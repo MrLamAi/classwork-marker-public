@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#2563eb">
+  <title>Marker Pro</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M9 17l5 5 9-11' stroke='white' stroke-width='3.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <script>
+    window.todayDateStr = function(d) {
+      var dt = d || new Date();
+      var y = dt.getFullYear();
+      var m = ('0' + (dt.getMonth() + 1)).slice(-2);
+      var day = ('0' + dt.getDate()).slice(-2);
+      return y + '-' + m + '-' + day;
+    };
+    window.csvCell = function(s) {
+      var str = String(s === null || s === undefined ? '' : s);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    };
+  </script>
+  <link rel="stylesheet" href="/styles.css?v=20260914_02">
+</head>
+
+<body>
+  <div id="netbar"></div>
+
+  <!-- ------------------------------------------------------- passcode gate -->
+  <div class="gate" id="gate">
+    <form class="gate-card" id="gateForm">
+      <div class="brand"><span class="brand-dot"></span>Marker<b>Pro</b></div>
+      <p>Enter the class passcode to continue.</p>
+      <input id="gateInput" type="password" inputmode="text" autocomplete="current-password"
+             placeholder="passcode" aria-label="Passcode" required>
+      <button type="submit" id="gateBtn">Unlock</button>
+      <div class="gate-err" id="gateErr" role="alert"></div>
+    </form>
+  </div>
+
+  <!-- ------------------------------------------------------------- app bar -->
+  <header class="appbar">
+    <div class="bar-side">
+      <div class="brand"><span class="brand-dot"></span>Lesson<b>Pro</b></div>
+      <label class="field">
+        <span class="field-label">班別 / Class</span>
+        <select id="clsSel"></select>
+      </label>
+      <label class="field">
+        <span class="field-label">日期 / Date</span>
+        <select id="dateSel"></select>
+      </label>
+    </div>
+
+    <!-- Mode switch pill: Classwork vs Discipline -->
+    <div class="mode-pill-wrap" id="modePillWrap" role="radiogroup" aria-label="操作模式">
+      <button type="button" class="mode-pill-btn is-active" id="modClassworkBtn" data-module="classwork" title="課堂作業點名與繳交登記">
+        <span class="gl">📝</span> 課堂作業
+      </button>
+      <button type="button" class="mode-pill-btn" id="modDisciplineBtn" data-module="discipline" title="學生課堂紀律、常規與加分登記">
+        <span class="gl">⚡</span> 學生紀律
+      </button>
+    </div>
+
+    <div class="bar-mid">
+      <div class="meter"><div id="meterFill" class="meter-fill"></div></div>
+      <div class="meter-text"><b id="meterDone">0</b><span id="meterTotal">/ 0 完成繳交</span></div>
+    </div>
+
+    <div class="bar-side end">
+      <button id="flipBtn" class="chip" title="翻轉座位表視角 180°">
+        <span class="gl">&#8645;</span>教師視角
+      </button>
+      <button id="settingsBtn" class="chip solid" title="開啟系統設定與堂班概況">
+        <span class="gl">⚙️</span> 設定
+      </button>
+    </div>
+  </header>
+
+  <!-- --------------------------------------- schedule & timetable banner -->
+  <div id="scheduleNoticeBanner" class="schedule-banner" hidden></div>
+
+  <!-- ------------------------------------------------------------ toolbars -->
+  <div class="toolbar">
+    <div class="tools normal" id="toolsNormal">
+      <button id="namesBtn" class="tool" title="切換姓名顯示方式（中文 / English / 中+En / 關閉）">姓名: 中</button>
+      <button id="layoutBtn" class="tool" title="進入拖曳或調整座位模式">編輯座次 / Edit Layout</button>
+      <button id="confirmLessonBtn" class="tool lesson-confirm-btn" title="登記當日課堂已進行（全員紀律良好，無違規記錄）">🟢 本堂全員良好</button>
+      <span class="spacer"></span>
+      <button id="clearBtn" class="tool quiet-danger" title="清空目前的作業繳交勾選">清空作業標記</button>
+    </div>
+
+    <div class="tools edit">
+      <span class="tool-group">
+        <button class="tool" data-act="fill" title="依學號 1..N 由左至右、由前至後自動填滿">依序排座</button>
+        <button class="tool" data-act="altmf" title="交替排列男女生座位">男女交替 (Alt M/F)</button>
+        <button class="tool" data-act="mirror" title="每行左右對調鏡像">左右鏡像</button>
+        <button class="tool" data-act="rows" title="前後行數對調">前後反轉</button>
+        <button class="tool" data-act="empty" title="清空所有座位">全部清空</button>
+        <button class="tool" data-act="undo" id="undoBtn" title="復原上一步">復原</button>
+      </span>
+      <span class="spacer"></span>
+      <span id="editHint" class="hint"></span>
+      <button id="cancelEdit" class="tool">取消</button>
+      <button id="saveEdit" class="tool primary">儲存座位佈局</button>
+    </div>
+  </div>
+
+  <!-- Floating Stamp Toolbox (Draggable & Collapsible, Bottom-Left) -->
+  <div class="floating-stamp-toolbox" id="floatingStampBar" hidden>
+    <div class="fs-header" id="fsHeader" title="按住拖曳移動 / 點擊展開或收起">
+      <span class="fs-drag-handle">⋮⋮</span>
+      <span class="fs-title" id="fsTitle">⚡ 快速蓋印</span>
+      <button type="button" class="fs-toggle-btn" id="fsToggleBtn" title="展開 / 收起工具箱">▾</button>
+    </div>
+    <div class="fs-body" id="fsBody">
+      <div class="fs-chips" id="floatingStampChips"></div>
+    </div>
+  </div>
+
+  <!-- ----------------------------------------------------------- workspace -->
+  <div class="workspace">
+    <aside id="reserve">
+      <div class="reserve-head">
+        未排座學生
+        <span id="reserveCount" class="pill-count">0</span>
+      </div>
+      <div id="reserveList" class="reserve-list"></div>
+      <p class="reserve-note">將卡片拖曳至座位，或先點擊卡片再點擊座位。</p>
+    </aside>
+
+    <main class="stage">
+      <div class="screen"><span>黑板 / 講台投影幕 (Screen / Whiteboard)</span></div>
+      <div class="gridwrap"><div id="grid"></div></div>
+    </main>
+  </div>
+
+  <!-- ------------------------------------------- student history & record modal -->
+  <div class="backdrop" id="studentHistoryModal" hidden style="z-index:120">
+    <div class="modal medium-modal" role="dialog" aria-modal="true" aria-labelledby="shTitle">
+      <div class="modal-head">
+        <div class="sh-head-profile">
+          <div class="sh-avatar" id="shAvatar">#1</div>
+          <div class="sh-info">
+            <h2 id="shTitle" class="sh-name">陳大文 <span class="sh-name-en" id="shNameEn">Chan Tai Man</span></h2>
+            <div class="sh-sub">
+              <span id="shClass">1A 班</span> · 
+              <span id="shStudentNo">學號 1</span> · 
+              <span id="shSeat">座位 #1</span> · 
+              <span id="shSex" class="sh-sex-tag">男</span>
+            </div>
+          </div>
+        </div>
+        <button class="icon-btn ghost" data-close="studentHistoryModal" aria-label="關閉">&times;</button>
+      </div>
+
+      <div class="modal-body sh-body">
+        <!-- Consecutive Infraction Alert Banner (6-Day Cycle Previous Lesson) -->
+        <div id="shConsecutiveBanner" class="sh-alert-banner" hidden></div>
+
+        <!-- Compact Quick Record Section (1-Tap Buttons) -->
+        <div class="sh-section sh-sec-compact">
+          <div class="sh-sec-head">
+            <span class="sh-sec-title">快速登記（今日：<span id="shTodayDate"></span>）</span>
+            <span class="sh-sec-tip">點擊即時登記，亦可先備註</span>
+          </div>
+          <div class="sh-note-row" style="margin-bottom:6px">
+            <input type="text" id="shNoteInput" class="text-input" placeholder="可選備註（例如：欠交第3課、忘帶第二冊）">
+          </div>
+          <div class="sh-quick-compact">
+            <button type="button" class="sh-qbtn btn-no-hw" data-sh-stamp="no_hw" data-label="欠交功課">
+              <span class="sh-qbtn-icon">❌</span> 欠交功課
+            </button>
+            <button type="button" class="sh-qbtn btn-no-book" data-sh-stamp="no_book" data-label="欠帶課本">
+              <span class="sh-qbtn-icon">📖</span> 欠帶課本
+            </button>
+            <button type="button" class="sh-qbtn btn-sleeping" data-sh-stamp="sleeping" data-label="課堂睡覺">
+              <span class="sh-qbtn-icon">😴</span> 課堂睡覺
+            </button>
+            <button type="button" class="sh-qbtn btn-talking" data-sh-stamp="talking" data-label="說話分心">
+              <span class="sh-qbtn-icon">🗣️</span> 說話分心
+            </button>
+            <button type="button" class="sh-qbtn btn-good" data-sh-stamp="good_perf" data-label="積極答問">
+              <span class="sh-qbtn-icon">⭐</span> 積極答問
+            </button>
+            <button type="button" class="sh-qbtn btn-warn" data-sh-stamp="warning" data-label="違規警告">
+              <span class="sh-qbtn-icon">⚠️</span> 違規警告
+            </button>
+          </div>
+        </div>
+
+        <!-- Cumulative Summary & Interactive Filter (學期累計統計與分類篩選) -->
+        <div class="sh-section sh-sec-compact">
+          <div class="sh-sec-head">
+            <span class="sh-sec-title">學期累計統計 ＆ 記錄篩選</span>
+            <span class="sh-sec-tip">點擊任一項可單獨篩選下方時序</span>
+          </div>
+          <div class="sh-filter-chips" id="shStatsRow"></div>
+        </div>
+
+        <!-- Full Chronological History Timeline (歷次紀律記錄) -->
+        <div class="sh-section">
+          <div class="sh-sec-head">
+            <span class="sh-sec-title">
+              歷次紀律記錄時序 (<span id="shHistoryCount">0</span> 則)
+            </span>
+            <span id="shFilterIndicator" class="sh-filter-indicator"></span>
+          </div>
+          <div class="sh-timeline" id="shTimelineList"></div>
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" id="shToggleClassworkBtn" class="tool">📝 標記作業完成</button>
+        <span class="spacer"></span>
+        <button type="button" class="tool primary" data-close="studentHistoryModal">完成 / 關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------ unified settings modal -->
+  <div class="backdrop" id="settingsModal" hidden style="z-index:115">
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-head">
+        <h2 id="settingsTitle">系統設定與堂班概況</h2>
+        <button class="icon-btn ghost" data-close="settingsModal" aria-label="關閉">&times;</button>
+      </div>
+
+      <div class="tabs" id="settingsTabs">
+        <button type="button" class="tab is-on" data-settab="overview">📋 當日堂班概況</button>
+        <button type="button" class="tab" data-settab="classes">🏫 班別與座次</button>
+        <button type="button" class="tab" data-settab="roster">👥 學生名單</button>
+        <button type="button" class="tab" data-settab="discipline">⚡ 紀律偏好</button>
+        <button type="button" class="tab" data-settab="tiledesign">🎨 座位卡設計</button>
+        <button type="button" class="tab" data-settab="api">🔌 軟體同步 API</button>
+      </div>
+
+      <div class="modal-body" style="max-height:65vh;overflow-y:auto">
+        <!-- Tab 1: Daily Class Overview -->
+        <section data-setpane="overview">
+          <div class="overview-header-bar">
+            <div class="overview-date-info">
+              <h3 class="setup-sec-title" style="margin:0">
+                <span id="overviewCurCls">1A</span> 班 · 日期：<span id="overviewCurDate"></span> 概況
+              </h3>
+            </div>
+            <div class="overview-actions">
+              <button type="button" id="copySummaryBtn" class="tool">📋 複製文字摘要</button>
+              <button type="button" id="exportLogCsvBtn" class="tool primary">💾 匯出 CSV 報表</button>
+              <button type="button" id="clearDateDisciplineBtn" class="tool quiet-danger">清空當日紀律記錄</button>
+          <div class="overview-calibration-card" style="margin:10px 0 12px;padding:9px 12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap">
+              <span>📅 <b>上一堂參考日期：</b></span>
+              <select id="overviewPrevDateSel" class="text-input" style="padding:3px 8px;font-size:12px;width:auto"></select>
+              <span class="muted" style="font-size:11px">（系統自動檢測，若某日忘帶 iPad 或零違規可於此手動更換）</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <button type="button" id="overviewConfirmLessonBtn" class="tool lesson-confirm-btn" style="font-size:12px">🟢 確認/補記本日已開課</button>
+            </div>
+          </div>
+
+          <div class="overview-stats-grid" id="overviewStatsGrid"></div>
+
+          <div class="log-summary-table-wrap" style="margin-top:14px">
+            <table class="log-summary-table" id="logSummaryTable">
+              <thead>
+                <tr>
+                  <th>學號</th>
+                  <th>學生姓名</th>
+                  <th>❌ 欠交功課</th>
+                  <th>📖 欠帶課本</th>
+                  <th>😴 課堂睡覺</th>
+                  <th>🗣️ 說話分心</th>
+                  <th>⭐ 積極答問</th>
+                  <th>⚠️ 違規警告</th>
+                  <th>📝 課堂作業</th>
+                </tr>
+              </thead>
+              <tbody id="logSummaryTbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Tab 2: Class Management & Seating Layout -->
+        <section data-setpane="classes" hidden>
+          <div class="setup-section">
+            <h3 class="setup-sec-title">目前班級設定 (<span id="setupCurCls"></span>)</h3>
+            <div class="setup-grid">
+              <label class="setup-field">
+                <span class="setup-label">學生總數 (Total Students)</span>
+                <input type="number" id="clsTotalInput" class="text-input" min="1" max="100">
+              </label>
+              <label class="setup-field">
+                <span class="setup-label">每行座位數 (Columns)</span>
+                <input type="number" id="clsColsInput" class="text-input" min="2" max="15">
+              </label>
+              <div class="setup-field-btn">
+                <button id="updateClsBtn" class="tool primary">儲存班級設定</button>
+              </div>
+            </div>
+
+            <!-- xClass CSV export box -->
+            <div class="xclass-export-box">
+              <span class="xclass-export-title">xClass CSV 匯出格式:</span>
+              <select id="xclassFmtSel" class="text-input" style="width:auto">
+                <option value="en">英文姓名 (English): Chan Tai Man (01)</option>
+                <option value="zh">中文姓名 (Chinese): 陳大文 (01)</option>
+                <option value="both">中英雙語 (Bilingual): 陳大文 Chan Tai Man (01)</option>
+              </select>
+              <button type="button" id="exportCurXClassBtn" class="tool">
+                <span class="gl">💾</span> 匯出目前班別 xClass CSV
+              </button>
+            </div>
+          </div>
+
+          <hr class="setup-divider">
+
+          <div class="setup-section">
+            <h3 class="setup-sec-title">新增班級</h3>
+            <div class="setup-grid">
+              <label class="setup-field">
+                <span class="setup-label">班別名稱 (例如: 1B, 2A)</span>
+                <input type="text" id="newClsName" class="text-input" placeholder="例如: 1B, 2A">
+              </label>
+              <label class="setup-field">
+                <span class="setup-label">學生總數</span>
+                <input type="number" id="newClsTotal" class="text-input" value="40" min="1" max="100">
+              </label>
+              <label class="setup-field">
+                <span class="setup-label">每行座位數</span>
+                <input type="number" id="newClsCols" class="text-input" value="8" min="2" max="15">
+              </label>
+              <div class="setup-field-btn">
+                <button id="addClsBtn" class="tool primary">新增班別</button>
+              </div>
+            </div>
+          </div>
+
+          <hr class="setup-divider">
+
+          <div class="setup-section">
+            <h3 class="setup-sec-title">所有班級列表</h3>
+            <div id="classListTable" class="class-list-table"></div>
+          </div>
+        </section>
+
+        <!-- Tab 3: Student Roster -->
+        <section data-setpane="roster" hidden>
+          <div class="roster-top-bar">
+            <div class="roster-toolbar-left">
+              <label class="setup-inline-label" style="display:flex;align-items:center;gap:6px">
+                <span class="setup-label" style="margin:0">班別:</span>
+                <select id="rosterClsSel" class="text-input" style="width:auto"></select>
+              </label>
+              <button type="button" id="openImportBtn" class="tool primary" style="height:30px">
+                <span class="gl">📥</span> 匯入名單
+              </button>
+            </div>
+
+            <!-- Sex helper -->
+            <div class="sex-helper-compact">
+              <span class="sex-helper-label">性別快速設定:</span>
+              <select id="sexOrderSel" class="text-input sex-sel">
+                <option value="boysStart">女在前，男由第</option>
+                <option value="girlsStart">男在前，女由第</option>
+              </select>
+              <input type="number" id="sexSplitNo" class="sex-input" value="17" min="1" max="100">
+              <span>號開始</span>
+              <button type="button" id="applySexSplit" class="tool small-tool">套用</button>
+            </div>
+          </div>
+
+          <p class="muted small" style="margin:4px 0 6px">
+            可以直接修改欄位，或拖曳左側 <b>⋮⋮</b> 調整學號順序。
+          </p>
+
+          <div class="roster-head">
+            <span></span><span>學號</span><span>中文姓名</span><span>英文姓名</span><span>性別</span>
+          </div>
+          <div id="rosterList" class="roster"></div>
+
+          <div style="display:flex;gap:10px;margin-top:12px">
+            <button id="rosterWipe" class="tool quiet-danger">清空名單</button>
+            <span class="spacer"></span>
+            <button id="rosterSave" class="tool primary">儲存名單</button>
+          </div>
+        </section>
+
+        <!-- Tab 4: Discipline Preferences -->
+        <section data-setpane="discipline" hidden>
+          <div class="setup-section">
+            <h3 class="setup-sec-title">懸浮快速蓋印列設定</h3>
+            <p class="muted small" style="margin-top:-4px">
+              平時點擊學生座位可直接查看完整歷史記錄與 1-Tap 登記。若需要於座位表下方長駐懸浮蓋印列，可在此啟用。
+            </p>
+            <label class="pref-checkbox-label">
+              <input type="checkbox" id="prefEnableFloatingBar">
+              <span>啟用主畫面懸浮快速蓋印列 (Floating Quick-Stamp Bar)</span>
+            </label>
+
+            <div id="prefFloatingChipsWrap" style="margin-top:12px;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line)">
+              <div class="setup-label" style="margin-bottom:8px">選擇長駐於懸浮列的蓋印項目：</div>
+              <div class="pref-chips-grid">
+                <label class="pref-chip-choice"><input type="checkbox" value="no_hw" checked> <span>❌ 欠交功課</span></label>
+                <label class="pref-chip-choice"><input type="checkbox" value="no_book" checked> <span>📖 欠帶課本</span></label>
+                <label class="pref-chip-choice"><input type="checkbox" value="sleeping" checked> <span>😴 課堂睡覺</span></label>
+                <label class="pref-chip-choice"><input type="checkbox" value="talking" checked> <span>🗣️ 說話分心</span></label>
+                <label class="pref-chip-choice"><input type="checkbox" value="good_perf" checked> <span>⭐ 積極答問</span></label>
+                <label class="pref-chip-choice"><input type="checkbox" value="warning" checked> <span>⚠️ 違規警告</span></label>
+              </div>
+            </div>
+          </div>
+
+          <hr class="setup-divider">
+
+          <div class="setup-section">
+            <h3 class="setup-sec-title">座位卡紀律徽章顯示模式</h3>
+            <div class="pref-radio-group">
+              <label class="pref-radio-label">
+                <input type="radio" name="badgeMode" value="icons" checked>
+                <span>顯示具體圖示與次數（例如：❌ 1 📖 1 ⭐ 2）</span>
+              </label>
+              <label class="pref-radio-label">
+                <input type="radio" name="badgeMode" value="count">
+                <span>僅顯示今日總違規次數標記</span>
+              </label>
+              <label class="pref-radio-label">
+                <input type="radio" name="badgeMode" value="off">
+                <span>完全隱藏座位卡徽章（點擊學生時才在個人面板查看）</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 5: Tile Design -->
+        <section data-setpane="tiledesign" hidden>
+          <div class="td-layout">
+            <div class="td-controls">
+              <h3 class="setup-sec-title">卡片欄位設定</h3>
+
+              <div class="td-field-group">
+                <label class="setup-label">左上角</label>
+                <select id="tdTopLeft" class="text-input">
+                  <option value="seat">座位號 (Seat No.)</option>
+                  <option value="classno">學號 (Class No.)</option>
+                  <option value="sex">性別 (Sex)</option>
+                  <option value="none">（隱藏）</option>
+                </select>
+              </div>
+
+              <div class="td-field-group">
+                <label class="setup-label">右上角</label>
+                <select id="tdTopRight" class="text-input">
+                  <option value="none">（隱藏）</option>
+                  <option value="seat">座位號 (Seat No.)</option>
+                  <option value="classno">學號 (Class No.)</option>
+                  <option value="sex">性別 (Sex)</option>
+                </select>
+              </div>
+
+              <div class="td-field-group">
+                <label class="setup-label">中間大字</label>
+                <select id="tdMain" class="text-input">
+                  <option value="classno">學號 (Class No.)</option>
+                  <option value="name_zh">中文姓名</option>
+                  <option value="name_en">英文姓名</option>
+                  <option value="seat">座位號</option>
+                </select>
+              </div>
+
+              <div class="td-field-group">
+                <label class="setup-label">底部文字</label>
+                <select id="tdBottom" class="text-input">
+                  <option value="name">姓名 (依姓名模式)</option>
+                  <option value="name_zh">中文姓名</option>
+                  <option value="name_en">英文姓名</option>
+                  <option value="classno">學號</option>
+                  <option value="seat">座位號</option>
+                  <option value="sex">性別</option>
+                  <option value="none">（隱藏）</option>
+                </select>
+              </div>
+
+              <hr class="setup-divider">
+              <button id="tdReset" class="tool small-tool">還原預設值</button>
+            </div>
+
+            <div class="td-preview-area">
+              <h3 class="setup-sec-title">座位卡預覽</h3>
+              <p class="muted small" style="margin:-6px 0 10px">點擊卡片上的文字元素可使用下方滑桿調整字級。</p>
+
+              <div class="td-preview-card" id="tdPreviewCard">
+                <span class="td-item td-topleft" data-item="topleft" id="tdPvTopLeft">#1</span>
+                <span class="td-item td-topright" data-item="topright" id="tdPvTopRight"></span>
+                <span class="td-item td-main" data-item="main" id="tdPvMain">17</span>
+                <span class="td-item td-bottom" data-item="bottom" id="tdPvBottom">陳大文</span>
+                <span class="td-item td-time" data-item="time" id="tdPvTime">10:32</span>
+              </div>
+
+              <div id="tdSliderBox" class="td-slider-box" hidden>
+                <span id="tdSliderLabel" class="setup-label"></span>
+                <input type="range" id="tdSlider" min="8" max="52" step="1" class="td-slider">
+                <span id="tdSliderVal" class="td-slider-val"></span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 6: Computer Software Sync API -->
+        <section data-setpane="api" hidden>
+          <p class="small muted" style="margin-top:0">
+            供電腦室學生端電腦、自動批改腳本或外部程式發送完成信號。伺服器收到後會即時同步至座位表。
+          </p>
+
+          <div class="api-info-grid">
+            <div class="api-info-item">
+              <span class="api-info-label">API 端點 URL (Endpoint):</span>
+              <code id="apiEndpointUrl">/api/external</code>
+            </div>
+            <div class="api-info-item">
+              <span class="api-info-label">認證金鑰 (API Key Header):</span>
+              <code>x-api-key: <span id="apiKeyDisplay">APP_PASSCODE</span></code>
+            </div>
+          </div>
+
+          <h3 class="setup-sec-title" style="margin-top:16px">程式範例代碼 (Code Examples)</h3>
+          <div class="tabs" style="margin-bottom:8px">
+            <button type="button" class="tab is-on" data-apicode="python">Python</button>
+            <button type="button" class="tab" data-apicode="curl">cURL</button>
+            <button type="button" class="tab" data-apicode="js">JavaScript / Node</button>
+          </div>
+
+          <div class="code-box-wrap">
+            <pre class="code-box" id="apiCodeBox"></pre>
+          </div>
+
+          <hr class="setup-divider" style="margin:16px 0">
+
+          <h3 class="setup-sec-title">即時信號測試 (Live Signal Tester)</h3>
+          <div class="api-tester-bar">
+            <label class="setup-inline-label">
+              <span class="setup-label" style="margin:0">班別:</span>
+              <select id="apiTestCls" class="text-input" style="width:auto"></select>
+            </label>
+            <label class="setup-inline-label">
+              <span class="setup-label" style="margin:0">學號:</span>
+              <input type="number" id="apiTestNo" class="text-input" style="width:75px" min="1" max="100" value="1">
+            </label>
+            <label class="setup-inline-label">
+              <span class="setup-label" style="margin:0">狀態:</span>
+              <select id="apiTestStatus" class="text-input" style="width:auto">
+                <option value="marked">完成繳交 (marked)</option>
+                <option value="unmarked">取消繳交 (unmarked)</option>
+              </select>
+            </label>
+            <button type="button" id="apiSendTestBtn" class="tool primary">
+              <span class="gl">🚀</span> 發送測試信號
+            </button>
+          </div>
+          <div id="apiTestResult" class="api-test-result" hidden></div>
+        </section>
+      </div>
+
+      <div class="modal-foot">
+        <span class="spacer"></span>
+        <button type="button" class="tool primary" data-close="settingsModal">完成 / 關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------------- import modal dialog -->
+  <div class="backdrop" id="importModal" hidden style="z-index:120">
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+      <div class="modal-head">
+        <h2 id="importModalTitle">匯入名單 / Import Student List (<span id="importTargetCls"></span>)</h2>
+        <button class="icon-btn ghost" data-close="importModal" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <p class="muted small" style="margin-bottom:8px">
+          支援從 Excel、Word 或文字檔案直接複製貼上。系統會自動辨識學號、英文姓名、中文姓名與性別。<br>
+          範例格式：<code>01 Chan Hoi Kei 陳鎧淇 F</code> 或 <code>01 [Tab] Chan Hoi Kei [Tab] 陳鎧淇</code>
+        </p>
+        <textarea id="importBox" class="import-box" spellcheck="false" style="min-height:160px"
+                  placeholder="01&#9;Chan Hoi Kei&#9;陳鎧淇&#10;02&#9;Chen Simeng&#9;陳思萌&#10;03&#9;Cheung Sin Tung Jossie&#9;張倩童"></textarea>
+        <div class="import-foot" style="margin-top:10px;display:flex;align-items:center;gap:10px">
+          <button type="button" id="previewBtn" class="tool">預覽解析 / Preview</button>
+          <span id="importInfo" class="hint"></span>
+        </div>
+        <div id="importPreview" class="preview" hidden style="margin-top:10px;max-height:220px;overflow-y:auto"></div>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" class="tool" data-close="importModal">取消 / Cancel</button>
+        <span class="spacer"></span>
+        <button type="button" id="applyImportBtn" class="tool primary">套用至名單 / Apply to Roster</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- --------------------------------------------------------- mini dialog -->
+  <div class="backdrop" id="askModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="askTitle">
+      <div class="modal-head">
+        <h2 id="askTitle"></h2>
+        <button class="icon-btn ghost" data-close="askModal" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="askMsg" class="muted"></p>
+        <input id="askInput" class="text-input" type="text" hidden>
+      </div>
+      <div class="modal-foot">
+        <span class="spacer"></span>
+        <button class="tool" data-close="askModal">Cancel</button>
+        <button id="askOk" class="tool primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+
+  <script src="/schedule-data.js?v=20260915_01"></script>
+  <script src="/app.js?v=20260915_01"></script>
+</body>
+</html>

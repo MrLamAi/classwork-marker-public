@@ -1,0 +1,19 @@
+{
+  "name": "classwork-marker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tap-off classwork marker on a seating plan",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node dev/server.mjs",
+    "dev:vercel": "vercel dev",
+    "check": "node --check public/app.js && node --check api/action.js && node --check api/external.js",
+    "gen:xclass": "node dev/generate_xclass_csv.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

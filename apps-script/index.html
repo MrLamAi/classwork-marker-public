@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('styles') ?>
+</head>
+
+<body class="booting">
+  <textarea id="jsonBridge" hidden><?!= jsonBundle ?></textarea>
+
+  <div id="netbar"></div>
+
+  <!-- ------------------------------------------------------------- app bar -->
+  <header class="appbar">
+    <div class="bar-side">
+      <div class="brand"><span class="brand-dot"></span>Marker<b>Pro</b></div>
+      <label class="field">
+        <span class="field-label">Class</span>
+        <select id="clsSel"></select>
+      </label>
+      <label class="field grow">
+        <span class="field-label">Assignment</span>
+        <select id="asgnSel"></select>
+      </label>
+      <button id="newAsgn" class="icon-btn" title="New assignment" aria-label="New assignment">+</button>
+    </div>
+
+    <div class="bar-mid">
+      <div class="meter"><div id="meterFill" class="meter-fill"></div></div>
+      <div class="meter-text"><b id="meterDone">0</b><span id="meterTotal">/ 0 handed in</span></div>
+    </div>
+
+    <div class="bar-side end">
+      <button id="flipBtn" class="chip" title="Flip the plan 180°"></button>
+      <button id="modeBtn" class="chip solid"></button>
+    </div>
+  </header>
+
+  <!-- ------------------------------------------------------------ toolbars -->
+  <div class="toolbar">
+    <div class="tools normal">
+      <button id="namesBtn" class="tool" title="Show or hide student names"></button>
+      <button id="rosterBtn" class="tool">Student list</button>
+      <button id="layoutBtn" class="tool">Edit layout</button>
+      <span class="spacer"></span>
+      <button id="clearBtn" class="tool quiet-danger">Clear all marks</button>
+    </div>
+
+    <div class="tools edit">
+      <span class="tool-group">
+        <button class="tool" data-act="fill" title="Seat 1..N left to right, front to back">Fill in order</button>
+        <button class="tool" data-act="mirror" title="Mirror every row left/right">Mirror</button>
+        <button class="tool" data-act="rows" title="Reverse the front-to-back order">Flip rows</button>
+        <button class="tool" data-act="empty">Empty all</button>
+        <button class="tool" data-act="undo" id="undoBtn">Undo</button>
+      </span>
+      <span class="spacer"></span>
+      <span id="editHint" class="hint"></span>
+      <button id="cancelEdit" class="tool">Cancel</button>
+      <button id="saveEdit" class="tool primary">Save layout</button>
+    </div>
+  </div>
+
+  <!-- ----------------------------------------------------------- workspace -->
+  <div class="workspace">
+    <aside id="reserve">
+      <div class="reserve-head">
+        Unseated
+        <span id="reserveCount" class="pill-count">0</span>
+      </div>
+      <div id="reserveList" class="reserve-list"></div>
+      <p class="reserve-note">Drag a card onto a desk, or tap a card then tap a desk.</p>
+    </aside>
+
+    <main class="stage">
+      <div class="screen"><span>Screen / Whiteboard</span></div>
+      <div class="gridwrap"><div id="grid"></div></div>
+    </main>
+  </div>
+
+  <!-- ------------------------------------------------------- student list -->
+  <div class="backdrop" id="rosterModal" hidden>
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="rosterTitle">
+      <div class="modal-head">
+        <h2 id="rosterTitle">Student list</h2>
+        <button class="icon-btn ghost" data-close="rosterModal" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab is-on" data-tab="list">Names &amp; numbers</button>
+        <button class="tab" data-tab="import">Paste a list</button>
+      </div>
+
+      <div class="modal-body">
+        <section data-pane="list">
+          <p class="muted small">
+            Edit a field in place, or drag a row to shift a student to a
+            different number &mdash; everyone in between moves along.
+          </p>
+          <div class="roster-head">
+            <span></span><span>No.</span><span>姓名</span><span>Name</span><span>English Name</span><span>Sex</span>
+          </div>
+          <div id="rosterList" class="roster"></div>
+        </section>
+
+        <section data-pane="import" hidden>
+          <p class="muted small">
+            Paste from a spreadsheet or a printed list &mdash; one student per line, into
+            the <strong>Name</strong> field. Lines like <code>12 Chan Tai Man</code> or
+            <code>12, Chan Tai Man</code> keep their own number; plain names are numbered
+            1, 2, 3&hellip; in order. 姓名 / English Name / Sex stay as they were.
+          </p>
+          <textarea id="importBox" class="import-box" spellcheck="false"
+                    placeholder="1  Chan Tai Man&#10;2  Wong Siu Ming&#10;3  Lee Ka Yan"></textarea>
+          <div class="import-foot">
+            <button id="previewBtn" class="tool">Preview</button>
+            <span id="importInfo" class="hint"></span>
+          </div>
+          <div id="importPreview" class="preview" hidden></div>
+        </section>
+      </div>
+
+      <div class="modal-foot">
+        <button id="rosterWipe" class="tool quiet-danger">Remove all names</button>
+        <span class="spacer"></span>
+        <button class="tool" data-close="rosterModal">Cancel</button>
+        <button id="rosterSave" class="tool primary">Save list</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- --------------------------------------------------------- mini dialog -->
+  <div class="backdrop" id="askModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="askTitle">
+      <div class="modal-head">
+        <h2 id="askTitle"></h2>
+        <button class="icon-btn ghost" data-close="askModal" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="askMsg" class="muted"></p>
+        <input id="askInput" class="text-input" type="text" hidden>
+      </div>
+      <div class="modal-foot">
+        <span class="spacer"></span>
+        <button class="tool" data-close="askModal">Cancel</button>
+        <button id="askOk" class="tool primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+
+  <?!= include('script') ?>
+</body>
+</html>

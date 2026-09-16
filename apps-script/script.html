@@ -1,0 +1,763 @@
+<script>
+(function () {
+'use strict';
+
+/* =============================================================== state */
+
+var S         = null;        // the server bundle
+var editMode  = false;
+var showNames = true;
+var orient    = 'teacher';   // 'teacher' | 'student'
+
+var dragging  = null;        // {n, from}  during an HTML5 drag
+var picked    = null;        // {n, from}  during tap-to-place
+var hist      = [];          // undo stack of seat arrays
+var pending   = {};          // student numbers waiting on the server
+var seatsSnapshot = null;    // for Cancel
+var pollTimer = null;
+var busyN     = 0;
+
+var rosterDraft = null;      // {no: name} being edited in the modal
+var askHandler  = null;
+
+/* ============================================================== helpers */
+
+function $(id) { return document.getElementById(id); }
+
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function busy(on) {
+  busyN = Math.max(0, busyN + (on ? 1 : -1));
+  document.body.classList.toggle('busy', busyN > 0);
+}
+
+function toast(msg, kind) {
+  var t = document.createElement('div');
+  t.className = 'toast' + (kind ? ' ' + kind : '');
+  t.textContent = msg;
+  $('toasts').appendChild(t);
+  setTimeout(function () { t.remove(); }, 2600);
+}
+
+function hhmm(d) {
+  return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+}
+
+function studentOf(n) { return S.names[String(n)] || null; }
+/** The one name shown on a desk - the romanised name, falling back to whatever else is on file. */
+function nameOf(n) {
+  var r = studentOf(n);
+  return r ? (r.name || r.zh || r.en || '') : '';
+}
+function hasAnyName(r) { return !!(r && (r.zh || r.name || r.en)); }
+
+function doneCount() { return Object.keys(S.status).length; }
+
+function rowsNow() { return Math.ceil(S.seats.length / S.cols); }
+
+function rowEmpty(r) {
+  for (var i = r * S.cols; i < (r + 1) * S.cols; i++) if (S.seats[i]) return false;
+  return true;
+}
+
+/* ================================================================= boot */
+
+function boot() {
+  S = JSON.parse($('jsonBridge').value);
+  // A projector opened straight into display mode starts numbers-only; if the
+  // teacher switches over from record mode their choice carries across.
+  showNames = (S.mode !== 'view');
+  applyModeDefaults();
+  wire();
+  render();
+  startPoll();
+  document.body.classList.remove('booting');
+}
+
+function applyModeDefaults() {
+  // Student display: screen on top, #1 top-right.
+  // Teacher record : screen at the foot, #1 bottom-left. (Same plan, rotated 180.)
+  orient = (S.mode === 'view') ? 'student' : 'teacher';
+}
+
+function wire() {
+  $('clsSel').addEventListener('change', function () { load(this.value, '', S.mode); });
+  $('asgnSel').addEventListener('change', function () { load(S.cls, this.value, S.mode); });
+  $('newAsgn').addEventListener('click', newAssignment);
+
+  $('flipBtn').addEventListener('click', function () {
+    orient = (orient === 'teacher') ? 'student' : 'teacher';
+    render();
+  });
+  $('modeBtn').addEventListener('click', function () {
+    load(S.cls, S.asgn, S.mode === 'view' ? 'record' : 'view');
+  });
+
+  $('namesBtn').addEventListener('click', function () { showNames = !showNames; render(); });
+  $('rosterBtn').addEventListener('click', openRoster);
+  $('layoutBtn').addEventListener('click', startEdit);
+  $('clearBtn').addEventListener('click', confirmClear);
+
+  $('cancelEdit').addEventListener('click', cancelEdit);
+  $('saveEdit').addEventListener('click', saveEdit);
+  Array.prototype.forEach.call(document.querySelectorAll('.tools.edit [data-act]'), function (b) {
+    b.addEventListener('click', function () { layoutAction(b.dataset.act); });
+  });
+
+  var res = $('reserve');
+  res.addEventListener('dragover', function (e) { e.preventDefault(); res.classList.add('over'); });
+  res.addEventListener('dragleave', function () { res.classList.remove('over'); });
+  res.addEventListener('drop', function (e) {
+    e.preventDefault(); res.classList.remove('over');
+    unseat(dragging); dragging = null;
+  });
+  res.addEventListener('click', function (e) {
+    if (picked && picked.from !== null && !e.target.closest('.tile')) { unseat(picked); picked = null; }
+  });
+
+  // modals
+  Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
+    b.addEventListener('click', function () { closeModal(b.dataset.close); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
+    b.addEventListener('click', function () { showTab(b.dataset.tab); });
+  });
+  $('previewBtn').addEventListener('click', previewImport);
+  $('rosterSave').addEventListener('click', saveRoster);
+  $('rosterWipe').addEventListener('click', function () {
+    rosterDraft = {}; renderRoster(); toast('Names cleared - press Save list to confirm');
+  });
+  $('askOk').addEventListener('click', function () {
+    var cb = askHandler; var v = $('askInput').value;
+    closeModal('askModal'); if (cb) cb(v);
+  });
+  $('askInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('askOk').click(); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (picked) { picked = null; render(); return; }
+      var open = document.querySelector('.backdrop:not([hidden])');
+      if (open) closeModal(open.id);
+    }
+  });
+}
+
+/* ============================================================== loading */
+
+function load(cls, asgn, mode) {
+  if (editMode) return;
+  busy(true);
+  google.script.run
+    .withSuccessHandler(function (b) {
+      busy(false);
+      S = b;
+      pending = {};
+      applyModeDefaults();
+      render();
+    })
+    .withFailureHandler(function (err) {
+      busy(false);
+      toast('Could not load: ' + err.message, 'err');
+    })
+    .getBundle(cls, asgn, mode);
+}
+
+/* =============================================================== render */
+
+function render() {
+  document.body.classList.toggle('edit-mode', editMode);
+  document.body.classList.toggle('view-mode', S.mode === 'view' && !editMode);
+  document.body.classList.toggle('orient-student', orient === 'student');
+  document.body.classList.toggle('show-names', showNames);
+
+  renderBar();
+  renderGrid();
+  renderReserve();
+}
+
+function renderBar() {
+  var cSel = $('clsSel'), aSel = $('asgnSel');
+
+  cSel.innerHTML = S.classes.map(function (c) {
+    return '<option value="' + esc(c) + '"' + (c === S.cls ? ' selected' : '') + '>' + esc(c) + '</option>';
+  }).join('');
+
+  aSel.innerHTML = S.sessions.map(function (s) {
+    var label = s.replace(/\s*\([^)]*\)\s*$/, '');
+    return '<option value="' + esc(s) + '"' + (s === S.asgn ? ' selected' : '') + '>' + esc(label) + '</option>';
+  }).join('');
+
+  cSel.disabled = aSel.disabled = editMode;
+  $('newAsgn').disabled = editMode;
+
+  var done = doneCount();
+  $('meterFill').style.width = (S.total ? (done / S.total * 100) : 0) + '%';
+  $('meterDone').textContent = done;
+  $('meterTotal').textContent = '/ ' + S.total + ' handed in';
+
+  $('flipBtn').innerHTML = '<span class="gl">&#8645;</span>' +
+    (orient === 'teacher' ? 'Teacher view' : 'Student view');
+  $('flipBtn').title = 'Now showing the ' + (orient === 'teacher' ? 'teacher' : 'student') +
+                       ' side. Click to rotate the plan 180°.';
+
+  $('modeBtn').innerHTML = (S.mode === 'view' ? 'Record mode' : 'Display mode') + ' <span class="gl">&#8594;</span>';
+
+  var has = Object.keys(S.names).length > 0;
+  $('namesBtn').textContent = showNames ? 'Names on' : 'Names off';
+  $('namesBtn').classList.toggle('on', showNames && has);
+  $('namesBtn').disabled = !has;
+  $('namesBtn').title = has ? 'Show or hide names on the desks'
+                            : 'Add a student list first';
+
+  $('undoBtn').disabled = hist.length === 0;
+
+  if (editMode) {
+    var seated = S.seats.filter(function (v) { return v; }).length;
+    $('editHint').textContent = picked
+      ? 'Tap a desk to place #' + picked.n
+      : seated + ' of ' + S.total + ' seated';
+  }
+}
+
+function renderGrid() {
+  var grid = $('grid');
+  var cols = S.cols;
+
+  if (editMode) ensureHeadroom();
+
+  var rows = rowsNow();
+  var order = [];
+  for (var r = 0; r < rows; r++) order.push(r);
+  if (orient === 'teacher') order.reverse();   // row 0 sits nearest the screen
+
+  grid.innerHTML = '';
+  var shown = 0;
+
+  order.forEach(function (r) {
+    if (!editMode && rowEmpty(r)) return;      // hide unused back rows when marking
+    shown++;
+    var idx = [];
+    for (var k = 0; k < cols; k++) idx.push(r * cols + k);
+    if (orient === 'student') idx.reverse();   // students see the mirror image
+    idx.forEach(function (gi) { grid.appendChild(seatEl(gi)); });
+  });
+
+  grid.style.gridTemplateColumns = 'repeat(' + cols + ', minmax(0, 1fr))';
+  grid.style.gridTemplateRows = 'repeat(' + Math.max(1, shown) + ', minmax(72px, 1fr))';
+}
+
+function seatEl(gi) {
+  var num  = S.seats[gi];
+  var seat = document.createElement('div');
+  seat.className = 'seat' + (num ? '' : ' empty');
+  seat.dataset.idx = gi + 1;
+
+  if (editMode) {
+    seat.addEventListener('dragover', function (e) { e.preventDefault(); seat.classList.add('over'); });
+    seat.addEventListener('dragleave', function () { seat.classList.remove('over'); });
+    seat.addEventListener('drop', function (e) {
+      e.preventDefault(); seat.classList.remove('over');
+      place(dragging, gi); dragging = null;
+    });
+    seat.addEventListener('click', function () { tapSeat(gi); });
+  }
+  if (num) seat.appendChild(tileEl(num, gi));
+  return seat;
+}
+
+function tileEl(n, from) {
+  var b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'tile';
+  b.dataset.n = n;
+
+  // Seated: the big number is the DESK (seat position) - who's sitting there
+  // is secondary. Unseated (reserve): there is no desk yet, so the big number
+  // is the only number that means anything - the student's own roll number.
+  var big = (from !== null) ? (from + 1) : n;
+  var nm  = nameOf(n);
+  var sub = (from !== null) ? (nm ? (nm + ' (' + n + ')') : ('#' + n)) : nm;
+
+  b.innerHTML = '<span class="t-num">' + big + '</span>' +
+                (sub ? '<span class="t-name">' + esc(sub) + '</span>' : '') +
+                '<span class="t-time"></span>';
+  b.title = nm ? (nm + ' (' + n + ')') : ('Student ' + n);
+
+  if (editMode) {
+    b.draggable = true;
+    b.addEventListener('dragstart', function (e) {
+      dragging = { n: n, from: from };
+      picked = null;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(n));
+      setTimeout(function () { b.classList.add('ghost'); }, 0);
+    });
+    b.addEventListener('dragend', function () { b.classList.remove('ghost'); dragging = null; });
+    if (from === null) b.addEventListener('click', function () { tapReserve(n); });
+  } else if (S.mode === 'record') {
+    b.addEventListener('click', function () { markStudent(n); });
+  }
+
+  paintTile(b, n);
+  return b;
+}
+
+function paintTile(b, n) {
+  var key  = String(n);
+  var time = S.status[key];
+  b.classList.toggle('done', !!time);
+  b.classList.toggle('saving', !!pending[key]);
+  b.classList.toggle('picked', !!picked && picked.n === n);
+  b.setAttribute('aria-pressed', time ? 'true' : 'false');
+  var t = b.querySelector('.t-time');
+  if (t) t.textContent = time || '';
+}
+
+function repaint(n) {
+  Array.prototype.forEach.call(
+    document.querySelectorAll('.tile[data-n="' + n + '"]'),
+    function (b) { paintTile(b, n); }
+  );
+  renderBar();
+}
+
+function renderReserve() {
+  if (!editMode) return;
+  var box = $('reserveList');
+  var seated = {};
+  S.seats.forEach(function (v) { if (v) seated[v] = true; });
+
+  box.innerHTML = '';
+  var n = 0;
+  for (var i = 1; i <= S.total; i++) {
+    if (seated[i]) continue;
+    n++;
+    var seat = document.createElement('div');
+    seat.className = 'seat';
+    seat.appendChild(tileEl(i, null));
+    box.appendChild(seat);
+  }
+  if (!n) box.innerHTML = '<div class="reserve-empty">Everyone has a desk.</div>';
+  $('reserveCount').textContent = n;
+}
+
+/* =============================================================== marking */
+
+function markStudent(n) {
+  if (S.mode !== 'record' || editMode) return;
+
+  var key  = String(n);
+  var prev = S.status[key];
+
+  if (prev) delete S.status[key];
+  else S.status[key] = hhmm(new Date());
+
+  pending[key] = true;
+  repaint(n);
+  if (!prev) {
+    var tile = document.querySelector('.tile[data-n="' + n + '"]');
+    if (tile) { tile.classList.add('just'); setTimeout(function () { tile.classList.remove('just'); }, 450); }
+  }
+
+  google.script.run
+    .withSuccessHandler(function (res) {
+      delete pending[key];
+      if (res && res.status === 'marked' && res.time) S.status[key] = res.time;
+      else if (res && res.status === 'unmarked') delete S.status[key];
+      repaint(n);
+    })
+    .withFailureHandler(function () {
+      delete pending[key];
+      if (prev) S.status[key] = prev; else delete S.status[key];
+      repaint(n);
+      toast('Not saved - check the connection', 'err');
+    })
+    .markDone(S.cls, S.asgn, n);
+}
+
+function startPoll() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(function () {
+    if (editMode || document.hidden) return;
+    if (document.querySelector('.backdrop:not([hidden])')) return;
+    if (Object.keys(pending).length) return;
+
+    google.script.run.withSuccessHandler(function (fresh) {
+      var changed = false, k;
+      for (k in fresh) {
+        if (!pending[k] && S.status[k] !== fresh[k]) { S.status[k] = fresh[k]; changed = true; }
+      }
+      for (k in S.status) {
+        if (!fresh[k] && !pending[k]) { delete S.status[k]; changed = true; }
+      }
+      if (changed) render();
+    }).getLiveStatus(S.cls, S.asgn);
+  }, 3500);
+}
+
+function confirmClear() {
+  ask({
+    title: 'Clear all marks?',
+    msg: 'This wipes every tick for "' + S.asgn.replace(/\s*\([^)]*\)\s*$/, '') +
+         '". The desk layout and student list are not touched.',
+    ok: 'Clear marks',
+    onOk: function () {
+      busy(true);
+      google.script.run
+        .withSuccessHandler(function () { busy(false); S.status = {}; render(); toast('Marks cleared', 'ok'); })
+        .withFailureHandler(function () { busy(false); toast('Could not clear', 'err'); })
+        .clearCurrentSession(S.cls, S.asgn);
+    }
+  });
+}
+
+function newAssignment() {
+  var d = new Date();
+  var code = String(d.getFullYear()).slice(-2) +
+             ('0' + (d.getMonth() + 1)).slice(-2) +
+             ('0' + d.getDate()).slice(-2);
+  ask({
+    title: 'New assignment',
+    msg: 'Everyone starts unmarked. Today’s assignments stay in the dropdown.',
+    input: code,
+    ok: 'Create',
+    onOk: function (name) {
+      if (!name || !name.trim()) return;
+      busy(true);
+      google.script.run
+        .withSuccessHandler(function (label) { busy(false); load(S.cls, label, S.mode); })
+        .withFailureHandler(function () { busy(false); toast('Could not create', 'err'); })
+        .createNewSession(S.cls, name.trim());
+    }
+  });
+}
+
+/* =========================================================== edit layout */
+
+function startEdit() {
+  editMode = true;
+  picked = null;
+  hist = [];
+  seatsSnapshot = S.seats.slice();
+  render();
+}
+
+function cancelEdit() {
+  S.seats = seatsSnapshot.slice();
+  editMode = false; picked = null; hist = [];
+  render();
+}
+
+function saveEdit() {
+  var seated = S.seats.filter(function (v) { return v; }).length;
+  var finish = function () {
+    busy(true);
+    google.script.run
+      .withSuccessHandler(function () { busy(false); toast('Layout saved', 'ok'); })
+      .withFailureHandler(function () { busy(false); toast('Layout NOT saved - try again', 'err'); })
+      .saveLayout(S.cls, S.seats);
+
+    editMode = false; picked = null; hist = [];
+    render();
+  };
+
+  if (seated < S.total) {
+    ask({
+      title: 'Save with empty places?',
+      msg: (S.total - seated) + ' of ' + S.total + ' students have no desk. ' +
+           'They will not appear on the plan until you seat them.',
+      ok: 'Save anyway',
+      onOk: finish
+    });
+  } else {
+    finish();
+  }
+}
+
+function pushHist() {
+  hist.push(S.seats.slice());
+  if (hist.length > 40) hist.shift();
+}
+
+/** Exactly enough desks for the class, rounded up to whole rows - never more. */
+function ensureHeadroom() {
+  var need = Math.ceil(S.total / S.cols) * S.cols;
+  while (S.seats.length > need) S.seats.pop();
+  while (S.seats.length < need) S.seats.push(null);
+}
+
+/** Move src onto seat gi. An occupied target swaps rather than overwrites. */
+function place(src, gi) {
+  if (!src) return;
+  pushHist();
+  var target = S.seats[gi] || null;
+  if (src.from !== null) S.seats[src.from] = target;   // swap
+  S.seats[gi] = src.n;                                 // from the reserve: target is bumped out
+  picked = null;
+  render();
+}
+
+function unseat(src) {
+  if (!src || src.from === null) return;
+  pushHist();
+  S.seats[src.from] = null;
+  picked = null;
+  render();
+}
+
+function tapSeat(gi) {
+  var occ = S.seats[gi] || null;
+  if (!picked) {
+    if (occ) { picked = { n: occ, from: gi }; render(); }
+    return;
+  }
+  if (picked.from === gi) { picked = null; render(); return; }
+  place(picked, gi);
+}
+
+function tapReserve(n) {
+  if (picked && picked.n === n) { picked = null; render(); return; }
+  picked = { n: n, from: null };
+  render();
+}
+
+function layoutAction(act) {
+  if (act === 'undo') {
+    if (!hist.length) return;
+    S.seats = hist.pop();
+    picked = null;
+    render();
+    return;
+  }
+
+  pushHist();
+  var cols = S.cols, rows = rowsNow(), r, k, i;
+
+  if (act === 'fill') {
+    // Grow first. The plan is trimmed to its occupied rows plus one spare, so a
+    // sparse layout would otherwise seat only the students that happen to fit.
+    var need = Math.ceil(S.total / cols) * cols;
+    while (S.seats.length < need) S.seats.push(null);
+    for (i = 0; i < S.seats.length; i++) S.seats[i] = (i < S.total) ? i + 1 : null;
+
+  } else if (act === 'empty') {
+    for (i = 0; i < S.seats.length; i++) S.seats[i] = null;
+
+  } else if (act === 'mirror') {
+    for (r = 0; r < rows; r++) {
+      var row = S.seats.slice(r * cols, (r + 1) * cols).reverse();
+      for (k = 0; k < cols; k++) S.seats[r * cols + k] = row[k];
+    }
+
+  } else if (act === 'rows') {
+    var out = [];
+    for (r = rows - 1; r >= 0; r--) out = out.concat(S.seats.slice(r * cols, (r + 1) * cols));
+    S.seats = out;
+  }
+
+  picked = null;
+  render();
+}
+
+/* ========================================================== student list */
+
+function openRoster() {
+  rosterDraft = {};
+  for (var k in S.names) rosterDraft[k] = Object.assign({}, S.names[k]);
+  $('importBox').value = '';
+  $('importPreview').hidden = true;
+  $('importInfo').textContent = '';
+  showTab('list');
+  renderRoster();
+  openModal('rosterModal');
+}
+
+function showTab(name) {
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
+    b.classList.toggle('is-on', b.dataset.tab === name);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pane]'), function (p) {
+    p.hidden = p.dataset.pane !== name;
+  });
+}
+
+function renderRoster() {
+  var box = $('rosterList');
+  box.innerHTML = '';
+
+  for (var n = 1; n <= S.total; n++) {
+    var rec = rosterDraft[n] || {};
+    var row = document.createElement('div');
+    row.className = 'rrow';
+    row.draggable = true;
+    row.dataset.no = n;
+    row.innerHTML =
+      '<span class="rgrip" aria-hidden="true" title="Drag to move to a different number">&#8942;&#8942;</span>' +
+      '<span class="rno">' + n + '</span>' +
+      '<input class="rname" data-f="zh" type="text" value="' + esc(rec.zh || '') + '" placeholder="姓名">' +
+      '<input class="rname" data-f="name" type="text" value="' + esc(rec.name || '') + '" placeholder="Name">' +
+      '<input class="rname" data-f="en" type="text" value="' + esc(rec.en || '') + '" placeholder="English Name">' +
+      '<select class="rsex" data-f="sex">' +
+        '<option value=""' + (rec.sex ? '' : ' selected') + '>—</option>' +
+        '<option value="M"' + (rec.sex === 'M' ? ' selected' : '') + '>M</option>' +
+        '<option value="F"' + (rec.sex === 'F' ? ' selected' : '') + '>F</option>' +
+      '</select>';
+    box.appendChild(row);
+  }
+
+  box.querySelectorAll('[data-f]').forEach(function (el) {
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () {
+      var no = el.closest('.rrow').dataset.no;
+      var v = el.value.trim();
+      var rec = rosterDraft[no] || (rosterDraft[no] = {});
+      rec[el.dataset.f] = v;
+      if (!hasAnyName(rec)) delete rosterDraft[no];
+    });
+  });
+
+  var dragRow = null;
+  box.querySelectorAll('.rrow').forEach(function (row) {
+    row.addEventListener('dragstart', function (e) {
+      dragRow = Number(row.dataset.no);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(dragRow));
+      setTimeout(function () { row.classList.add('ghost'); }, 0);
+    });
+    row.addEventListener('dragend', function () { row.classList.remove('ghost'); dragRow = null; });
+    row.addEventListener('dragover', function (e) { e.preventDefault(); row.classList.add('over'); });
+    row.addEventListener('dragleave', function () { row.classList.remove('over'); });
+    row.addEventListener('drop', function (e) {
+      e.preventDefault(); row.classList.remove('over');
+      if (dragRow) { moveRecord(dragRow, Number(row.dataset.no)); renderRoster(); }
+      dragRow = null;
+    });
+  });
+}
+
+/** Pull the record out of slot `from` and drop it in at `to`; the rest shuffle up. */
+function moveRecord(from, to) {
+  var arr = [];
+  for (var i = 1; i <= S.total; i++) arr.push(rosterDraft[i] || null);
+  var v = arr.splice(from - 1, 1)[0];
+  arr.splice(to - 1, 0, v);
+  rosterDraft = {};
+  arr.forEach(function (rec, i) { if (hasAnyName(rec)) rosterDraft[i + 1] = rec; });
+}
+
+function parseRoster(text) {
+  var numbered = {}, plain = [];
+
+  String(text || '').split(/\r?\n/).forEach(function (line) {
+    line = line.replace(/\s+$/, '');
+    if (!line.trim()) return;
+
+    var m = line.match(/^\s*(\d{1,3})\s*[.,、)\]:\-\t]\s*(.+)$/) ||
+            line.match(/^\s*(\d{1,3})\s{2,}(.+)$/) ||
+            line.match(/^\s*(\d{1,3})\s+(\D.*)$/);
+    if (m) {
+      var no = parseInt(m[1], 10);
+      var nm = m[2].split('\t')[0].trim();
+      if (nm) {
+        // a number outside 1..total is a mismatch, not part of the name
+        if (no >= 1 && no <= S.total) numbered[no] = nm; else plain.push(nm);
+        return;
+      }
+    }
+    plain.push(line.split('\t')[0].trim());
+  });
+
+  if (!Object.keys(numbered).length) {
+    plain.forEach(function (nm, i) { if (i < S.total && nm) numbered[i + 1] = nm; });
+  } else {
+    var next = 1;
+    plain.forEach(function (nm) {
+      while (next <= S.total && numbered[next]) next++;
+      if (next <= S.total && nm) numbered[next++] = nm;
+    });
+  }
+  return numbered;
+}
+
+function previewImport() {
+  var parsed = parseRoster($('importBox').value);
+  var keys = Object.keys(parsed).map(Number).sort(function (a, b) { return a - b; });
+
+  if (!keys.length) {
+    $('importInfo').textContent = 'Nothing recognised yet.';
+    $('importPreview').hidden = true;
+    return;
+  }
+
+  $('importPreview').hidden = false;
+  $('importPreview').innerHTML = keys.map(function (n) {
+    return '<div><b>' + n + '</b> ' + esc(parsed[n]) + '</div>';
+  }).join('');
+
+  $('importInfo').innerHTML = keys.length + ' names found. ' +
+    '<button class="tool primary" id="applyImport" style="height:26px">Use these names</button>';
+
+  $('applyImport').addEventListener('click', function () {
+    // A pasted list only ever supplies one name string per line - land it in
+    // "Name" and leave 姓名 / English Name / Sex alone if already filled in.
+    keys.forEach(function (n) {
+      var rec = rosterDraft[n] || (rosterDraft[n] = {});
+      rec.name = parsed[n];
+    });
+    renderRoster();
+    showTab('list');
+    toast(keys.length + ' names loaded - press Save list');
+  });
+}
+
+function saveRoster() {
+  var list = [];
+  for (var n = 1; n <= S.total; n++) {
+    var rec = rosterDraft[n];
+    if (hasAnyName(rec)) {
+      list.push({ no: n, zh: rec.zh || '', name: rec.name || '', en: rec.en || '', sex: rec.sex || '' });
+    }
+  }
+  busy(true);
+  google.script.run
+    .withSuccessHandler(function (names) {
+      busy(false);
+      S.names = names || {};
+      closeModal('rosterModal');
+      render();
+      toast(list.length + ' names saved', 'ok');
+    })
+    .withFailureHandler(function () { busy(false); toast('Could not save the list', 'err'); })
+    .saveStudents(S.cls, list);
+}
+
+/* =============================================================== dialogs */
+
+function openModal(id) { $(id).hidden = false; }
+
+function closeModal(id) {
+  $(id).hidden = true;
+  if (id === 'askModal') askHandler = null;
+}
+
+function ask(o) {
+  $('askTitle').textContent = o.title;
+  $('askMsg').textContent = o.msg || '';
+  $('askMsg').hidden = !o.msg;
+  $('askOk').textContent = o.ok || 'OK';
+
+  var inp = $('askInput');
+  inp.hidden = (o.input === undefined);
+  inp.value = o.input || '';
+
+  askHandler = o.onOk;
+  openModal('askModal');
+  if (!inp.hidden) setTimeout(function () { inp.focus(); inp.select(); }, 30);
+}
+
+boot();
+})();
+</script>
