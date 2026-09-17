@@ -4,7 +4,7 @@ import {
   saveLayout, saveStudents, updateStudent, createSession,
   createClass, deleteClass, updateClass,
   recordLessonEvent, deleteLessonEvent, clearLessonEvents,
-  recordDiscipline, deleteDisciplineRecord, getStudentDisciplineHistory,
+  recordDiscipline, deleteDisciplineRecord, updateDisciplineRecord, getStudentDisciplineHistory,
   clearClassDisciplineForDate, confirmLesson, deleteLessonDate,
   getClassDisciplineHistory
 } from '../lib/db.js';
@@ -131,6 +131,12 @@ export default guard(async (req, res) => {
       if (!req.body.id) return res.status(400).json({ error: 'record id required' });
       const deleted = await deleteDisciplineRecord(req.body.id);
       return res.status(200).json({ ok: true, deleted });
+    }
+
+    case 'updateDisciplineNote': {
+      if (!req.body.id) return res.status(400).json({ error: 'record id required' });
+      const record = await updateDisciplineRecord(req.body.id, req.body.note || '');
+      return res.status(200).json({ ok: true, record });
     }
 
     case 'getStudentHistory': {

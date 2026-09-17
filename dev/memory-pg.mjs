@@ -325,6 +325,25 @@ function exec(text, params = []) {
     return inserted;
   }
 
+  if (q.startsWith('update discipline_records')) {
+    db.discipline = db.discipline || [];
+    const id = p[0];
+    const note = p[1];
+    const rec = db.discipline.find((r) => String(r.id) === String(id));
+    if (rec) rec.note = note;
+    return rec ? [{
+      id: String(rec.id),
+      class: rec.class,
+      student_no: rec.student_no,
+      date: rec.record_date,
+      time: rec.record_time,
+      type: rec.type,
+      label: rec.label,
+      note: rec.note,
+      created_at: rec.created_at
+    }] : [];
+  }
+
   if (q.startsWith('delete from discipline_records where id = $1')) {
     db.discipline = db.discipline || [];
     const idx = db.discipline.findIndex((r) => String(r.id) === String(p[0]));

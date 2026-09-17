@@ -3,8 +3,8 @@
 (function () {
 'use strict';
 
-var APP_VERSION = '2.5.1';
-var APP_COMMIT  = 'e5038ec';
+var APP_VERSION = '2.6.0';
+var APP_COMMIT  = '949bf7d';
 
 /* =============================================================== state */
 
@@ -28,16 +28,19 @@ var askHandler  = null;
 var rosterEditCls = null;  // class being edited in roster/import tabs
 
 var appModule   = 'discipline'; // 'classwork' | 'discipline' (default: discipline)
-var activeStamp = 'none';       // 'none' | 'no_hw' | 'no_book' | 'sleeping' | 'talking' | 'good_perf' | 'warning'
+var activeStamp = 'none';       // 'none' | 'no_hw' | 'no_book' | 'sleeping' | 'talking' | 'device' | 'washroom' | 'good_perf' | 'warning'
 var currentShStudent = null;    // student number currently open in studentHistoryModal
-var currentShFilter  = 'all';   // 'all' | 'no_hw' | 'no_book' | 'sleeping' | 'talking' | 'good_perf' | 'warning'
+var currentShFilter  = 'all';   // 'all' | 'no_hw' | 'no_book' | 'sleeping' | 'talking' | 'device' | 'washroom' | 'good_perf' | 'warning'
 var currentShHistory = [];      // cached history records of the open student
+var activeWashrooms  = {};      // { [studentNo]: { startTime: '10:15', startTimestamp: 123456789, recordId: '...' } }
 
 var STAMPS = {
   no_hw:     { label: '欠交功課', icon: '❌', class: 'badge-no_hw' },
   no_book:   { label: '欠帶課本', icon: '📖', class: 'badge-no_book' },
   sleeping:  { label: '課堂睡覺', icon: '😴', class: 'badge-sleeping' },
   talking:   { label: '說話分心', icon: '🗣️', class: 'badge-talking' },
+  device:    { label: '展示電子器材', icon: '📱', class: 'badge-device' },
+  washroom:  { label: '上洗手間', icon: '🚻', class: 'badge-washroom' },
   good_perf: { label: '積極答問', icon: '⭐', class: 'badge-good_perf' },
   warning:   { label: '違規警告', icon: '⚠️', class: 'badge-warning' }
 };
@@ -46,7 +49,7 @@ var STAMPS = {
 var disciplinePrefsDefaults = {
   enableFloatingBar: true,
   floatingCollapsed: false,
-  floatingChips: ['no_hw', 'no_book', 'sleeping', 'talking', 'good_perf', 'warning'],
+  floatingChips: ['no_hw', 'no_book', 'sleeping', 'talking', 'device', 'washroom', 'good_perf', 'warning'],
   badgeMode: 'icons', // 'icons' | 'count' | 'off'
   badgePos: 'top-right' // 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left' | 'floating-right'
 };
@@ -382,7 +385,11 @@ function wire() {
       var label = btn.dataset.label;
       var note = $('shNoteInput') ? $('shNoteInput').value.trim() : '';
       var tile = document.querySelector('.tile[data-n="' + currentShStudent + '"]');
-      recordDisciplineForStudent(currentShStudent, type, label, note, tile);
+      if (type === 'washroom') {
+        toggleWashroomForStudent(currentShStudent, tile);
+      } else {
+        recordDisciplineForStudent(currentShStudent, type, label, note, tile);
+      }
       if ($('shNoteInput')) $('shNoteInput').value = '';
     });
   });
@@ -893,6 +900,7 @@ function load(cls, asgn, date, prevDate) {
     pending = {};
     unlock();
     applyModeDefaults();
+    syncActiveWashrooms();
     syncUrl();
     render();
     startPoll();
@@ -1439,6 +1447,28 @@ function paintTile(b, n) {
     }
   }
 
+  // Washroom active state (2-second slow pulse gradient yellow)
+  var isInWashroom = !!(activeWashrooms && activeWashrooms[key]);
+  b.classList.toggle('in-washroom', isInWashroom);
+
+  var wIndicator = b.querySelector('.tile-washroom-indicator');
+  if (isInWashroom) {
+    if (!wIndicator) {
+      wIndicator = document.createElement('span');
+      wIndicator.className = 'tile-washroom-indicator';
+      wIndicator.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleWashroomForStudent(n, b);
+      });
+      b.appendChild(wIndicator);
+    }
+    var wInfo = activeWashrooms[key] || {};
+    wIndicator.textContent = '🚻 ' + (wInfo.startTime || '') + ' 離席中';
+    wIndicator.title = '正在上洗手間（自 ' + (wInfo.startTime || '') + ' 離席），點擊記錄已回課室';
+  } else if (wIndicator) {
+    wIndicator.remove();
+  }
+
   // Render discipline event badges
   var badgeWrap = b.querySelector('.t-badges');
   if (!badgeWrap) {
@@ -1460,13 +1490,16 @@ function paintTile(b, n) {
     } else if (bMode === 'count') {
       var infractions = 0;
       var bonus = 0;
+      var washrooms = 0;
       todayBadges.forEach(function (e) {
         if (e.type === 'good_perf') bonus++;
+        else if (e.type === 'washroom') washrooms++;
         else infractions++;
       });
       var html = '';
       if (infractions > 0) html += '<span class="t-badge badge-warning">⚠️ ' + infractions + '</span>';
       if (bonus > 0) html += '<span class="t-badge badge-good_perf">⭐ ' + bonus + '</span>';
+      if (washrooms > 0) html += '<span class="t-badge badge-washroom">🚻 ' + washrooms + '</span>';
       badgeWrap.innerHTML = html;
     } else {
       var counts = {};
@@ -2442,8 +2475,191 @@ function switchModule(targetMod) {
 
 /* ======================================= performance & discipline */
 
+function loadActiveWashrooms() {
+  try {
+    var raw = localStorage.getItem('classwork_washrooms_' + (S ? S.cls : ''));
+    if (raw) activeWashrooms = JSON.parse(raw);
+    else activeWashrooms = {};
+  } catch (e) {
+    activeWashrooms = {};
+  }
+}
+
+function saveActiveWashrooms() {
+  try {
+    if (S && S.cls) {
+      localStorage.setItem('classwork_washrooms_' + S.cls, JSON.stringify(activeWashrooms));
+    }
+  } catch (e) {}
+}
+
+function syncActiveWashrooms() {
+  loadActiveWashrooms();
+  if (S && S.discipline && S.discipline.allRecords) {
+    var today = S.date || todayDateStr();
+    S.discipline.allRecords.forEach(function (r) {
+      if (r.date === today && r.type === 'washroom') {
+        var note = r.note || '';
+        if (note.indexOf('離席中') >= 0 || (note.indexOf('離開課室') >= 0 && note.indexOf('回課室') === -1)) {
+          var key = String(r.student_no);
+          if (!activeWashrooms[key]) {
+            activeWashrooms[key] = {
+              startTime: r.time,
+              startTimestamp: new Date(r.created_at || Date.now()).getTime(),
+              date: r.date,
+              recordId: r.id
+            };
+          }
+        }
+      }
+    });
+  }
+}
+
+function updateShWashroomBtnState(n) {
+  var shWBtn = $('shWashroomBtn');
+  if (!shWBtn) return;
+  var isOut = !!(activeWashrooms && activeWashrooms[String(n)]);
+  if (isOut) {
+    var wInfo = activeWashrooms[String(n)] || {};
+    shWBtn.classList.add('is-active-washroom');
+    shWBtn.innerHTML = '<span class="sh-qbtn-icon">🚻</span> 記錄已回課室 (' + (wInfo.startTime || '') + ' 離席)';
+    shWBtn.title = '點擊標記已回課室（自 ' + (wInfo.startTime || '') + ' 離席）';
+  } else {
+    shWBtn.classList.remove('is-active-washroom');
+    shWBtn.innerHTML = '<span class="sh-qbtn-icon">🚻</span> 上洗手間';
+    shWBtn.title = '記錄離開課室前往洗手間時間';
+  }
+}
+
+function toggleWashroomForStudent(n, tileEl) {
+  if (!S || !n) return;
+  var key = String(n);
+  var targetTile = tileEl || document.querySelector('.tile[data-n="' + n + '"]');
+  var r = studentOf(n);
+  var stName = (r && (r.zh || r.name || r.en)) ? (r.zh || r.name || r.en) : ('#' + n);
+  var now = new Date();
+  var curTime = hhmm(now);
+
+  if (!activeWashrooms[key]) {
+    // 1. LEAVE CLASSROOM
+    var tempId = 'temp_wash_' + Date.now();
+    activeWashrooms[key] = {
+      startTime: curTime,
+      startTimestamp: now.getTime(),
+      date: S.date || todayDateStr(),
+      recordId: tempId
+    };
+    saveActiveWashrooms();
+
+    if (targetTile) {
+      var fl = document.createElement('span');
+      fl.className = 'float-badge';
+      fl.textContent = '🚻 離席 ' + curTime;
+      targetTile.appendChild(fl);
+      setTimeout(function () { fl.remove(); }, 850);
+    }
+
+    var initNote = curTime + ' 離開課室 (離席中...)';
+    recordDisciplineForStudent(n, 'washroom', '上洗手間', initNote, targetTile);
+
+    var studentStat = S.discipline && S.discipline.studentStats && S.discipline.studentStats[key];
+    if (studentStat && studentStat.today_badges && studentStat.today_badges.length) {
+      var lastBadge = studentStat.today_badges[studentStat.today_badges.length - 1];
+      if (lastBadge && lastBadge.type === 'washroom') {
+        activeWashrooms[key].recordId = lastBadge.id;
+        saveActiveWashrooms();
+      }
+    }
+
+    repaint(n);
+    if ($('studentHistoryModal') && !$('studentHistoryModal').hidden && currentShStudent === n) {
+      updateShWashroomBtnState(n);
+    }
+    toast('已記錄 #' + n + ' ' + stName + '：🚻 離開課室前往洗手間（' + curTime + '）', 'warn');
+  } else {
+    // 2. RETURN TO CLASSROOM
+    var wInfo = activeWashrooms[key];
+    var startTime = wInfo.startTime || curTime;
+    var returnTime = curTime;
+    var diffMins = Math.max(1, Math.round((now.getTime() - (wInfo.startTimestamp || now.getTime())) / 60000));
+
+    if (isNaN(diffMins) || diffMins < 0 || diffMins > 300) {
+      var sParts = startTime.split(':');
+      var eParts = returnTime.split(':');
+      if (sParts.length === 2 && eParts.length === 2) {
+        var sMin = parseInt(sParts[0], 10) * 60 + parseInt(sParts[1], 10);
+        var eMin = parseInt(eParts[0], 10) * 60 + parseInt(eParts[1], 10);
+        diffMins = Math.max(1, eMin - sMin);
+      } else {
+        diffMins = 1;
+      }
+    }
+
+    var finalNote = startTime + ' 離席 - ' + returnTime + ' 回課室 (共 ' + diffMins + ' 分鐘)';
+    var recId = wInfo.recordId;
+
+    delete activeWashrooms[key];
+    saveActiveWashrooms();
+
+    // Update in S.discipline
+    if (S.discipline && S.discipline.allRecords) {
+      var localRec = S.discipline.allRecords.find(function (x) {
+        return (recId && String(x.id) === String(recId)) ||
+               (String(x.student_no) === key && x.type === 'washroom' && (x.note || '').indexOf('離席中') >= 0);
+      });
+      if (localRec) {
+        localRec.note = finalNote;
+        recId = localRec.id;
+      }
+    }
+
+    if (currentShHistory) {
+      var shRec = currentShHistory.find(function (x) {
+        return (recId && String(x.id) === String(recId)) ||
+               (String(x.student_no || currentShStudent) === key && x.type === 'washroom' && (x.note || '').indexOf('離席中') >= 0);
+      });
+      if (shRec) {
+        shRec.note = finalNote;
+      }
+    }
+
+    var studentStat2 = S.discipline && S.discipline.studentStats && S.discipline.studentStats[key];
+    if (studentStat2 && studentStat2.today_badges) {
+      var bd = studentStat2.today_badges.find(function (x) {
+        return (recId && String(x.id) === String(recId)) || (x.type === 'washroom' && (x.note || '').indexOf('離席中') >= 0);
+      });
+      if (bd) bd.note = finalNote;
+    }
+
+    if (recId && !String(recId).startsWith('temp_')) {
+      post({
+        action: 'updateDisciplineNote',
+        id: recId,
+        note: finalNote
+      }).catch(function (err) {
+        console.warn('Failed to update washroom return note on server:', err);
+      });
+    }
+
+    repaint(n);
+    if ($('studentHistoryModal') && !$('studentHistoryModal').hidden && currentShStudent === n) {
+      updateShWashroomBtnState(n);
+      renderStudentHistoryStats(n);
+      renderTimelineList(currentShHistory, n);
+    }
+    toast('已記錄 #' + n + ' ' + stName + '：🚻 回到課室（' + startTime + ' - ' + returnTime + '，共 ' + diffMins + ' 分鐘）', 'ok');
+  }
+}
+
 function handleDisciplineClick(n, tileEl) {
-  if (activeStamp !== 'none' && STAMPS[activeStamp]) {
+  var key = String(n);
+  if (activeStamp === 'washroom') {
+    toggleWashroomForStudent(n, tileEl);
+  } else if (activeWashrooms && activeWashrooms[key]) {
+    // If student is in washroom, tapping them restores card and records return!
+    toggleWashroomForStudent(n, tileEl);
+  } else if (activeStamp !== 'none' && STAMPS[activeStamp]) {
     recordDisciplineForStudent(n, activeStamp, STAMPS[activeStamp].label, '', tileEl);
   } else {
     openStudentHistoryModal(n);
@@ -2475,16 +2691,18 @@ function recordDisciplineForStudent(n, type, label, note, tileEl) {
   if (!S.discipline.studentStats) S.discipline.studentStats = {};
   if (!S.discipline.studentStats[key]) {
     S.discipline.studentStats[key] = {
-      totals: { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, total_infractions: 0 },
+      totals: { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, device: 0, washroom: 0, total_infractions: 0 },
       today_badges: []
     };
   }
 
   var stat = S.discipline.studentStats[key];
-  var optimisticBadge = { id: tempId, type: type, label: displayLabel, time: curTime };
+  var optimisticBadge = { id: tempId, type: type, label: displayLabel, time: curTime, note: note || '' };
   stat.today_badges.push(optimisticBadge);
   if (type === 'good_perf') {
     stat.totals.good_perf++;
+  } else if (type === 'washroom') {
+    stat.totals.washroom = (stat.totals.washroom || 0) + 1;
   } else {
     if (stat.totals[type] !== undefined) stat.totals[type]++;
     stat.totals.total_infractions++;
@@ -2542,6 +2760,7 @@ function recordDisciplineForStudent(n, type, label, note, tileEl) {
     var idx = stat.today_badges.findIndex(function (b) { return b.id === tempId; });
     if (idx >= 0) stat.today_badges.splice(idx, 1);
     if (type === 'good_perf') stat.totals.good_perf = Math.max(0, stat.totals.good_perf - 1);
+    else if (type === 'washroom') stat.totals.washroom = Math.max(0, (stat.totals.washroom || 0) - 1);
     else {
       if (stat.totals[type] !== undefined) stat.totals[type] = Math.max(0, stat.totals[type] - 1);
       stat.totals.total_infractions = Math.max(0, stat.totals.total_infractions - 1);
@@ -2568,6 +2787,12 @@ function deleteDisciplineItem(recId, n) {
       removedBadge = stat.today_badges.splice(idx, 1)[0];
       if (removedBadge.type === 'good_perf') {
         stat.totals.good_perf = Math.max(0, stat.totals.good_perf - 1);
+      } else if (removedBadge.type === 'washroom') {
+        stat.totals.washroom = Math.max(0, (stat.totals.washroom || 0) - 1);
+        if (activeWashrooms[key] && String(activeWashrooms[key].recordId) === String(recId)) {
+          delete activeWashrooms[key];
+          saveActiveWashrooms();
+        }
       } else {
         if (stat.totals[removedBadge.type] !== undefined) stat.totals[removedBadge.type] = Math.max(0, stat.totals[removedBadge.type] - 1);
         stat.totals.total_infractions = Math.max(0, stat.totals.total_infractions - 1);
@@ -2625,6 +2850,7 @@ function openStudentHistoryModal(n) {
 
   var isDone = !!(S.status && S.status[String(n)]);
   updateShClassworkBtn(isDone);
+  updateShWashroomBtnState(n);
 
   // Consecutive Infraction Alert Banner (6-Day Cycle Previous Lesson)
   var banner = $('shConsecutiveBanner');
@@ -2634,7 +2860,7 @@ function openStudentHistoryModal(n) {
     var prevDate = (S.discipline && S.discipline.previousLessonDate) || S.previousLessonDate || '';
     var alertItems = [];
 
-    ['no_hw', 'no_book', 'sleeping', 'talking', 'warning'].forEach(function (type) {
+    ['no_hw', 'no_book', 'sleeping', 'talking', 'device', 'warning'].forEach(function (type) {
       if (prevAlerts[type] && STAMPS[type]) {
         var streak = (stat.consecutive_streaks && stat.consecutive_streaks[type]) ? '（已連續 ' + stat.consecutive_streaks[type] + ' 堂）' : '';
         alertItems.push('【' + STAMPS[type].icon + ' ' + STAMPS[type].label + streak + '】');
@@ -2777,7 +3003,7 @@ function renderStudentHistoryStats(n) {
   var row = $('shStatsRow');
   if (!row) return;
 
-  var totalAll = currentShHistory.length || (totals.total_infractions || 0) + (totals.good_perf || 0);
+  var totalAll = currentShHistory.length || (totals.total_infractions || 0) + (totals.good_perf || 0) + (totals.washroom || 0);
 
   var items = [
     { key: 'all', label: '全部', count: totalAll, icon: '📋', cls: '' },
@@ -2785,6 +3011,8 @@ function renderStudentHistoryStats(n) {
     { key: 'no_book', label: '欠帶課本', count: totals.no_book || 0, icon: '📖', cls: 'badge-no_book' },
     { key: 'sleeping', label: '課堂睡覺', count: totals.sleeping || 0, icon: '😴', cls: 'badge-sleeping' },
     { key: 'talking', label: '說話分心', count: totals.talking || 0, icon: '🗣️', cls: 'badge-talking' },
+    { key: 'device', label: '展示電子器材', count: totals.device || 0, icon: '📱', cls: 'badge-device' },
+    { key: 'washroom', label: '上洗手間', count: totals.washroom || 0, icon: '🚻', cls: 'badge-washroom' },
     { key: 'good_perf', label: '積極答問', count: totals.good_perf || 0, icon: '⭐', cls: 'badge-good_perf' },
     { key: 'warning', label: '違規警告', count: totals.warning || 0, icon: '⚠️', cls: 'badge-warning' }
   ];
@@ -2919,6 +3147,8 @@ function renderOverviewTab() {
       no_book: 0,
       sleeping: 0,
       talking: 0,
+      device: 0,
+      washroom: 0,
       good_perf: 0,
       warning: 0,
       classworkDone: doneCount()
@@ -2957,6 +3187,14 @@ function renderOverviewTab() {
         '<span class="overview-stat-val" style="color:#854d0e">' + counts.talking + '</span>' +
       '</div>' +
       '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">📱 展示器材</span>' +
+        '<span class="overview-stat-val" style="color:#1e40af">' + counts.device + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">🚻 上洗手間</span>' +
+        '<span class="overview-stat-val" style="color:#854d0e">' + counts.washroom + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
         '<span class="overview-stat-label">⭐ 積極答問</span>' +
         '<span class="overview-stat-val" style="color:#166534">' + counts.good_perf + '</span>' +
       '</div>' +
@@ -2973,13 +3211,15 @@ function renderOverviewTab() {
       thead.innerHTML = '<tr>' +
         '<th style="width:48px">學號</th>' +
         '<th>姓名</th>' +
-        '<th style="width:75px">欠交功課</th>' +
-        '<th style="width:75px">欠帶課本</th>' +
-        '<th style="width:75px">課堂睡覺</th>' +
-        '<th style="width:75px">說話分心</th>' +
-        '<th style="width:75px">積極答問</th>' +
-        '<th style="width:75px">違規警告</th>' +
-        '<th style="width:140px">課堂作業完成</th>' +
+        '<th style="width:70px">欠交功課</th>' +
+        '<th style="width:70px">欠帶課本</th>' +
+        '<th style="width:70px">課堂睡覺</th>' +
+        '<th style="width:70px">說話分心</th>' +
+        '<th style="width:70px">展示器材</th>' +
+        '<th style="width:70px">上洗手間</th>' +
+        '<th style="width:70px">積極答問</th>' +
+        '<th style="width:70px">違規警告</th>' +
+        '<th style="width:130px">課堂作業完成</th>' +
       '</tr>';
     }
 
@@ -2987,7 +3227,7 @@ function renderOverviewTab() {
     for (var i = 1; i <= totalStudents; i++) {
       var st2 = stats[String(i)];
       var badges = st2 ? (st2.today_badges || []) : [];
-      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
+      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, device: 0, washroom: 0, good_perf: 0, warning: 0 };
       badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
 
       var isDone = !!(S.status && S.status[String(i)]);
@@ -3003,6 +3243,8 @@ function renderOverviewTab() {
         '<td>' + (c.no_book ? '<span class="t-badge badge-no_book">' + c.no_book + '</span>' : '-') + '</td>' +
         '<td>' + (c.sleeping ? '<span class="t-badge badge-sleeping">' + c.sleeping + '</span>' : '-') + '</td>' +
         '<td>' + (c.talking ? '<span class="t-badge badge-talking">' + c.talking + '</span>' : '-') + '</td>' +
+        '<td>' + (c.device ? '<span class="t-badge badge-device">' + c.device + '</span>' : '-') + '</td>' +
+        '<td>' + (c.washroom ? '<span class="t-badge badge-washroom">' + c.washroom + '</span>' : '-') + '</td>' +
         '<td>' + (c.good_perf ? '<span class="t-badge badge-good_perf">+' + c.good_perf + '</span>' : '-') + '</td>' +
         '<td>' + (c.warning ? '<span class="t-badge badge-warning">' + c.warning + '</span>' : '-') + '</td>' +
         '<td>' + (isDone ? '<span style="color:var(--done);font-weight:700">✓ 已完成 (' + esc(S.status[String(i)]) + ')</span>' : '<span class="muted">未繳交</span>') + '</td>' +
@@ -3037,6 +3279,8 @@ function renderOverviewTab() {
       no_book: 0,
       sleeping: 0,
       talking: 0,
+      device: 0,
+      washroom: 0,
       good_perf: 0,
       warning: 0,
       total_infractions: 0
@@ -3049,6 +3293,8 @@ function renderOverviewTab() {
       cumCounts.no_book += (tot.no_book || 0);
       cumCounts.sleeping += (tot.sleeping || 0);
       cumCounts.talking += (tot.talking || 0);
+      cumCounts.device += (tot.device || 0);
+      cumCounts.washroom += (tot.washroom || 0);
       cumCounts.good_perf += (tot.good_perf || 0);
       cumCounts.warning += (tot.warning || 0);
       cumCounts.total_infractions += (tot.total_infractions || 0);
@@ -3078,6 +3324,14 @@ function renderOverviewTab() {
         '<span class="overview-stat-val" style="color:#854d0e">' + cumCounts.talking + '</span>' +
       '</div>' +
       '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">📱 展示器材累計</span>' +
+        '<span class="overview-stat-val" style="color:#1e40af">' + cumCounts.device + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">🚻 上洗手間累計</span>' +
+        '<span class="overview-stat-val" style="color:#854d0e">' + cumCounts.washroom + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
         '<span class="overview-stat-label">⭐ 積極答問累計</span>' +
         '<span class="overview-stat-val" style="color:#166534">' + cumCounts.good_perf + '</span>' +
       '</div>' +
@@ -3094,20 +3348,22 @@ function renderOverviewTab() {
       thead.innerHTML = '<tr>' +
         '<th style="width:48px">學號</th>' +
         '<th>姓名</th>' +
-        '<th style="width:80px">欠交累計</th>' +
-        '<th style="width:80px">欠帶累計</th>' +
-        '<th style="width:80px">睡覺累計</th>' +
-        '<th style="width:80px">說話累計</th>' +
-        '<th style="width:80px">積極累計</th>' +
-        '<th style="width:80px">違規警告</th>' +
-        '<th style="width:90px">總違規次數</th>' +
+        '<th style="width:75px">欠交累計</th>' +
+        '<th style="width:75px">欠帶累計</th>' +
+        '<th style="width:75px">睡覺累計</th>' +
+        '<th style="width:75px">說話累計</th>' +
+        '<th style="width:75px">展示器材</th>' +
+        '<th style="width:75px">上洗手間</th>' +
+        '<th style="width:75px">積極累計</th>' +
+        '<th style="width:75px">違規警告</th>' +
+        '<th style="width:85px">總違規次數</th>' +
       '</tr>';
     }
 
     var cumRows = '';
     for (var j = 1; j <= totalStudents; j++) {
       var sst2 = stats[String(j)];
-      var t = (sst2 && sst2.totals) || { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, total_infractions: 0 };
+      var t = (sst2 && sst2.totals) || { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, device: 0, washroom: 0, good_perf: 0, warning: 0, total_infractions: 0 };
       var r2 = studentOf(j);
       var zh2 = (r2 && r2.zh) || '';
       var en2 = (r2 && (r2.en || r2.name)) || '';
@@ -3120,6 +3376,8 @@ function renderOverviewTab() {
         '<td>' + (t.no_book ? '<span class="t-badge badge-no_book">' + t.no_book + '</span>' : '-') + '</td>' +
         '<td>' + (t.sleeping ? '<span class="t-badge badge-sleeping">' + t.sleeping + '</span>' : '-') + '</td>' +
         '<td>' + (t.talking ? '<span class="t-badge badge-talking">' + t.talking + '</span>' : '-') + '</td>' +
+        '<td>' + (t.device ? '<span class="t-badge badge-device">' + t.device + '</span>' : '-') + '</td>' +
+        '<td>' + (t.washroom ? '<span class="t-badge badge-washroom">' + t.washroom + '</span>' : '-') + '</td>' +
         '<td>' + (t.good_perf ? '<span class="t-badge badge-good_perf">+' + t.good_perf + '</span>' : '-') + '</td>' +
         '<td>' + (t.warning ? '<span class="t-badge badge-warning">' + t.warning + '</span>' : '-') + '</td>' +
         '<td>' + (t.total_infractions ? '<b style="color:#dc2626">' + t.total_infractions + ' 次</b>' : '<span class="muted">0</span>') + '</td>' +
@@ -3264,6 +3522,8 @@ var DISCIPLINE_TYPE_LABELS = {
   no_book: '欠帶課本',
   sleeping: '課堂睡覺',
   talking: '說話分心',
+  device: '展示電子器材',
+  washroom: '上洗手間',
   good_perf: '積極答問',
   warning: '違規警告'
 };
@@ -3352,13 +3612,13 @@ function exportDailyReport(format) {
 
   if (format === 'csv') {
     var lines = [];
-    lines.push('班別,學號,中文姓名,英文姓名,性別,欠交功課,欠帶課本,課堂睡覺,說話分心,積極答問,違規警告,今日違規小計,課堂作業狀態,上堂欠交提示,上堂欠帶提示,記錄日期');
+    lines.push('班別,學號,中文姓名,英文姓名,性別,欠交功課,欠帶課本,課堂睡覺,說話分心,展示電子器材,上洗手間,積極答問,違規警告,今日違規小計,課堂作業狀態,上堂欠交提示,上堂欠帶提示,記錄日期');
     for (var i = 1; i <= totalStudents; i++) {
       var st = stats[String(i)];
       var badges = st ? (st.today_badges || []) : [];
-      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
+      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, device: 0, washroom: 0, good_perf: 0, warning: 0 };
       badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
-      var totalInfractions = c.no_hw + c.no_book + c.sleeping + c.talking + c.warning;
+      var totalInfractions = c.no_hw + c.no_book + c.sleeping + c.talking + c.device + c.warning;
       var isDone = !!(S.status && S.status[String(i)]);
       var r = studentOf(i);
       var zh = (r && r.zh) || '';
@@ -3377,6 +3637,8 @@ function exportDailyReport(format) {
         csvCell(c.no_book),
         csvCell(c.sleeping),
         csvCell(c.talking),
+        csvCell(c.device),
+        csvCell(c.washroom),
         csvCell(c.good_perf),
         csvCell(c.warning),
         csvCell(totalInfractions),
@@ -3390,16 +3652,16 @@ function exportDailyReport(format) {
   } else {
     var html = '<table><thead><tr>' +
       '<th>班別</th><th>學號</th><th>中文姓名</th><th>英文姓名</th><th>性別</th>' +
-      '<th>欠交功課</th><th>欠帶課本</th><th>課堂睡覺</th><th>說話分心</th><th>積極答問</th><th>違規警告</th>' +
+      '<th>欠交功課</th><th>欠帶課本</th><th>課堂睡覺</th><th>說話分心</th><th>展示電子器材</th><th>上洗手間</th><th>積極答問</th><th>違規警告</th>' +
       '<th>今日違規小計</th><th>課堂作業狀態</th><th>上堂欠交提示</th><th>上堂欠帶提示</th><th>記錄日期</th>' +
       '</tr></thead><tbody>';
 
     for (var i = 1; i <= totalStudents; i++) {
       var st = stats[String(i)];
       var badges = st ? (st.today_badges || []) : [];
-      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
+      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, device: 0, washroom: 0, good_perf: 0, warning: 0 };
       badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
-      var totalInfractions = c.no_hw + c.no_book + c.sleeping + c.talking + c.warning;
+      var totalInfractions = c.no_hw + c.no_book + c.sleeping + c.talking + c.device + c.warning;
       var isDone = !!(S.status && S.status[String(i)]);
       var r = studentOf(i);
       var zh = (r && r.zh) || '';
@@ -3418,6 +3680,8 @@ function exportDailyReport(format) {
         '<td class="center' + (c.no_book > 0 ? ' alert-text' : '') + '">' + c.no_book + '</td>' +
         '<td class="center' + (c.sleeping > 0 ? ' alert-text' : '') + '">' + c.sleeping + '</td>' +
         '<td class="center' + (c.talking > 0 ? ' alert-text' : '') + '">' + c.talking + '</td>' +
+        '<td class="center' + (c.device > 0 ? ' alert-text' : '') + '">' + c.device + '</td>' +
+        '<td class="center' + (c.washroom > 0 ? ' good-text' : '') + '">' + c.washroom + '</td>' +
         '<td class="center' + (c.good_perf > 0 ? ' good-text' : '') + '">' + c.good_perf + '</td>' +
         '<td class="center' + (c.warning > 0 ? ' alert-text' : '') + '">' + c.warning + '</td>' +
         '<td class="center' + (totalInfractions > 0 ? ' alert-text' : '') + '">' + totalInfractions + '</td>' +
@@ -3442,10 +3706,10 @@ function exportCumulativeReport(format) {
 
   if (format === 'csv') {
     var lines = [];
-    lines.push('班別,學號,中文姓名,英文姓名,性別,累計欠交功課,累計欠帶課本,累計課堂睡覺,累計說話分心,累計違規警告,累計違規總數,累計積極答問,統計截至日期');
+    lines.push('班別,學號,中文姓名,英文姓名,性別,累計欠交功課,累計欠帶課本,累計課堂睡覺,累計說話分心,累計展示器材,累計上洗手間,累計違規警告,累計違規總數,累計積極答問,統計截至日期');
     for (var i = 1; i <= totalStudents; i++) {
       var st = stats[String(i)];
-      var tot = (st && st.totals) ? st.totals : { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, total_infractions: 0 };
+      var tot = (st && st.totals) ? st.totals : { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, device: 0, washroom: 0, good_perf: 0, warning: 0, total_infractions: 0 };
       var r = studentOf(i);
       var zh = (r && r.zh) || '';
       var en = (r && (r.en || r.name)) || '';
@@ -3461,6 +3725,8 @@ function exportCumulativeReport(format) {
         csvCell(tot.no_book || 0),
         csvCell(tot.sleeping || 0),
         csvCell(tot.talking || 0),
+        csvCell(tot.device || 0),
+        csvCell(tot.washroom || 0),
         csvCell(tot.warning || 0),
         csvCell(tot.total_infractions || 0),
         csvCell(tot.good_perf || 0),
@@ -3471,13 +3737,13 @@ function exportCumulativeReport(format) {
   } else {
     var html = '<table><thead><tr>' +
       '<th>班別</th><th>學號</th><th>中文姓名</th><th>英文姓名</th><th>性別</th>' +
-      '<th>累計欠交功課</th><th>累計欠帶課本</th><th>累計課堂睡覺</th><th>累計說話分心</th><th>累計違規警告</th><th>累計違規總數</th>' +
+      '<th>累計欠交功課</th><th>累計欠帶課本</th><th>累計課堂睡覺</th><th>累計說話分心</th><th>累計展示器材</th><th>累計上洗手間</th><th>累計違規警告</th><th>累計違規總數</th>' +
       '<th>累計積極答問</th><th>統計截至日期</th>' +
       '</tr></thead><tbody>';
 
     for (var i = 1; i <= totalStudents; i++) {
       var st = stats[String(i)];
-      var tot = (st && st.totals) ? st.totals : { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, total_infractions: 0 };
+      var tot = (st && st.totals) ? st.totals : { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, device: 0, washroom: 0, good_perf: 0, warning: 0, total_infractions: 0 };
       var r = studentOf(i);
       var zh = (r && r.zh) || '';
       var en = (r && (r.en || r.name)) || '';
@@ -3493,6 +3759,8 @@ function exportCumulativeReport(format) {
         '<td class="center' + ((tot.no_book || 0) > 0 ? ' alert-text' : '') + '">' + (tot.no_book || 0) + '</td>' +
         '<td class="center' + ((tot.sleeping || 0) > 0 ? ' alert-text' : '') + '">' + (tot.sleeping || 0) + '</td>' +
         '<td class="center' + ((tot.talking || 0) > 0 ? ' alert-text' : '') + '">' + (tot.talking || 0) + '</td>' +
+        '<td class="center' + ((tot.device || 0) > 0 ? ' alert-text' : '') + '">' + (tot.device || 0) + '</td>' +
+        '<td class="center' + ((tot.washroom || 0) > 0 ? ' good-text' : '') + '">' + (tot.washroom || 0) + '</td>' +
         '<td class="center' + ((tot.warning || 0) > 0 ? ' alert-text' : '') + '">' + (tot.warning || 0) + '</td>' +
         '<td class="center' + ((tot.total_infractions || 0) > 0 ? ' alert-text' : '') + '">' + (tot.total_infractions || 0) + '</td>' +
         '<td class="center' + ((tot.good_perf || 0) > 0 ? ' good-text' : '') + '">' + (tot.good_perf || 0) + '</td>' +
