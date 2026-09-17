@@ -80,9 +80,12 @@ function exec(text, params = []) {
   if (q.startsWith('create table') || q.startsWith('alter table') || q.startsWith('create index')) return [];
 
   if (q.includes('count(*)') && q.includes('from classes')) return [{ n: db.classes.length }];
+  if (q.includes('count(*)') && q.includes('from students')) return [{ n: db.students.length }];
+  if (q.includes('count(*)') && q.includes('from discipline_records')) return [{ n: db.discipline.length }];
 
   if (q.startsWith('insert into classes')) {
-    if (!db.classes.some((c) => c.name === p[0])) {
+    const existing = db.classes.find((c) => c.name === p[0]);
+    if (!existing) {
       db.classes.push({ name: p[0], total: p[1], cols: p[2], seats: p[3] || '' });
     }
     return [];
@@ -104,6 +107,15 @@ function exec(text, params = []) {
   }
 
   if (q.startsWith('update classes set seats')) {
+    if (q.includes('where name = $2')) {
+      const c = db.classes.find((x) => x.name === p[1]);
+      if (c) {
+        c.seats = p[0];
+        if (q.includes('total = 32')) { c.total = 32; c.cols = 8; }
+        else if (q.includes('total = 30')) { c.total = 30; c.cols = 6; }
+      }
+      return [];
+    }
     const c = db.classes.find((x) => x.name === p[0]);
     if (c) c.seats = p[1];
     return [];
