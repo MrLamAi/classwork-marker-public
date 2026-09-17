@@ -315,6 +315,40 @@ function wire() {
   if ($('clsSel')) $('clsSel').addEventListener('change', function () { load(this.value, '', S ? S.date : '').catch(fail); });
   if ($('dateSel')) $('dateSel').addEventListener('change', function () { load(S.cls, '', this.value).catch(fail); });
 
+  if ($('datePickerBtn')) {
+    $('datePickerBtn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var menu = $('dateDropdownMenu');
+      if (menu) menu.hidden = !menu.hidden;
+    });
+  }
+
+  var dateDropMenu = $('dateDropdownMenu');
+  if (dateDropMenu) {
+    dateDropMenu.addEventListener('click', function (e) {
+      var btnDate = e.target.closest('[data-jump-date]');
+      if (btnDate && btnDate.dataset.jumpDate) {
+        dateDropMenu.hidden = true;
+        load(S.cls, '', btnDate.dataset.jumpDate).catch(fail);
+        return;
+      }
+      var btnCls = e.target.closest('[data-jump-class]');
+      if (btnCls && btnCls.dataset.jumpClass) {
+        dateDropMenu.hidden = true;
+        load(btnCls.dataset.jumpClass, '', S ? S.date : '').catch(fail);
+        return;
+      }
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var wrap = $('dateFieldWrap');
+    if (wrap && !wrap.contains(e.target)) {
+      var menu = $('dateDropdownMenu');
+      if (menu) menu.hidden = true;
+    }
+  });
+
   var schedBanner = $('scheduleNoticeBanner');
   if (schedBanner) {
     schedBanner.addEventListener('click', function (e) {
@@ -454,6 +488,41 @@ function wire() {
   });
 
   // Overview tab & export actions
+  if ($('overviewClsSel')) {
+    $('overviewClsSel').addEventListener('change', function () {
+      var targetCls = this.value;
+      if (targetCls && S && targetCls !== S.cls) {
+        load(targetCls, '', S.date).then(function () {
+          renderOverviewTab();
+        }).catch(fail);
+      }
+    });
+  }
+
+  if ($('overviewDateSel')) {
+    $('overviewDateSel').addEventListener('change', function () {
+      var targetDate = this.value;
+      if (targetDate && S && targetDate !== S.date) {
+        load(S.cls, '', targetDate).then(function () {
+          renderOverviewTab();
+        }).catch(fail);
+      }
+    });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.overview-view-pill'), function (pill) {
+    pill.addEventListener('click', function () {
+      overviewCurrentView = pill.dataset.view || 'daily';
+      renderOverviewTab();
+    });
+  });
+
+  if ($('overviewSearchInput')) {
+    $('overviewSearchInput').addEventListener('input', function () {
+      filterOverviewTable(this.value);
+    });
+  }
+
   if ($('copySummaryBtn')) $('copySummaryBtn').addEventListener('click', copyLogSummary);
   if ($('exportLogCsvBtn')) $('exportLogCsvBtn').addEventListener('click', openExportModal);
   if ($('exportRecordsBtn')) $('exportRecordsBtn').addEventListener('click', openExportModal);
@@ -504,6 +573,16 @@ function wire() {
     });
   });
 
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="badgePos"]'), function (inp) {
+    inp.addEventListener('change', function () {
+      if (this.checked) {
+        disciplinePrefs.badgePos = this.value;
+        saveDisciplinePrefs();
+        renderGrid();
+      }
+    });
+  });
+
   // API tab code tabs
   Array.prototype.forEach.call(document.querySelectorAll('[data-apicode]'), function (btn) {
     btn.addEventListener('click', function () {
@@ -543,23 +622,68 @@ function wire() {
   });
 
   // Class Management actions
+  function updateCapacityDisplay() {
+    var tot = parseInt($('clsTotalInput').value, 10) || 0;
+    var cols = parseInt($('clsColsInput').value, 10) || 1;
+    var rows = parseInt($('clsRowsInput').value, 10) || 1;
+    if ($('clsCapacityVal')) $('clsCapacityVal').textContent = rows * cols;
+  }
+
+  if ($('clsTotalInput')) {
+    $('clsTotalInput').addEventListener('input', function () {
+      var tot = parseInt(this.value, 10) || 0;
+      var cols = parseInt($('clsColsInput').value, 10) || 8;
+      if (cols > 0 && tot > 0) {
+        $('clsRowsInput').value = Math.ceil(tot / cols);
+      }
+      updateCapacityDisplay();
+    });
+  }
+
+  if ($('clsColsInput')) {
+    $('clsColsInput').addEventListener('input', function () {
+      var tot = parseInt($('clsTotalInput').value, 10) || 0;
+      var cols = parseInt(this.value, 10) || 1;
+      if (cols > 0 && tot > 0) {
+        $('clsRowsInput').value = Math.ceil(tot / cols);
+      }
+      updateCapacityDisplay();
+    });
+  }
+
+  if ($('clsRowsInput')) {
+    $('clsRowsInput').addEventListener('input', function () {
+      updateCapacityDisplay();
+    });
+  }
+
   if ($('updateClsBtn')) {
     $('updateClsBtn').addEventListener('click', function () {
       var total = parseInt($('clsTotalInput').value, 10);
       var cols = parseInt($('clsColsInput').value, 10);
       if (!total || total < 1 || !cols || cols < 2) {
-        toast('Invalid student total or columns', 'err');
+        toast('學生總數或列數設定無效', 'err');
         return;
       }
       post({ action: 'updateClass', cls: S.cls, total: total, cols: cols })
         .then(function () {
-          toast('Class settings saved', 'ok');
+          toast('班級設定已成功儲存', 'ok');
           return load(S.cls, S.asgn);
         })
         .then(function () {
-          openClassSetup('classes');
+          openSettingsModal('classes');
         })
         .catch(fail);
+    });
+  }
+
+  if ($('toggleAddClsBoxBtn')) {
+    $('toggleAddClsBoxBtn').addEventListener('click', function () {
+      var box = $('addClsBox');
+      if (box) {
+        box.hidden = !box.hidden;
+        if (!box.hidden && $('newClsName')) $('newClsName').focus();
+      }
     });
   }
 
@@ -569,16 +693,47 @@ function wire() {
       var total = parseInt($('newClsTotal').value, 10) || 40;
       var cols = parseInt($('newClsCols').value, 10) || 8;
       if (!name) {
-        toast('Please enter a class name', 'err');
+        toast('請輸入班別名稱', 'err');
         return;
       }
       post({ action: 'createClass', name: name, total: total, cols: cols })
         .then(function () {
-          toast('Class ' + name + ' created', 'ok');
-          closeModal('classSetupModal');
+          toast('班級 ' + name + ' 已建立', 'ok');
+          if ($('addClsBox')) $('addClsBox').hidden = true;
+          if ($('newClsName')) $('newClsName').value = '';
           return load(name, '');
         })
+        .then(function () {
+          openSettingsModal('classes');
+        })
         .catch(fail);
+    });
+  }
+
+  if ($('deleteCurClsBtn')) {
+    $('deleteCurClsBtn').addEventListener('click', function () {
+      var name = S.cls;
+      var list = S.classList || (S.classes || []).map(function (c) { return { name: c }; });
+      if (list.length <= 1) {
+        toast('系統僅剩一個班級，無法刪除', 'err');
+        return;
+      }
+      ask({
+        title: '刪除班級 ' + name + '？',
+        msg: '此操作將永久刪除 ' + name + ' 班的座次表、歷次作業記錄與學生名單，無法還原。確認刪除？',
+        ok: '確認刪除',
+        onOk: function () {
+          post({ action: 'deleteClass', cls: name })
+            .then(function () {
+              toast('班級 ' + name + ' 已刪除', 'ok');
+              return load('', '');
+            })
+            .then(function () {
+              openSettingsModal('classes');
+            })
+            .catch(fail);
+        }
+      });
     });
   }
 
