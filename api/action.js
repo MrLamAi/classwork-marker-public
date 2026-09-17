@@ -1,7 +1,7 @@
 import { guard } from '../lib/auth.js';
 import {
   ensureSchema, sessionId, toggleMark, clearSession,
-  saveLayout, saveStudents, createSession,
+  saveLayout, saveStudents, updateStudent, createSession,
   createClass, deleteClass, updateClass,
   recordLessonEvent, deleteLessonEvent, clearLessonEvents,
   recordDiscipline, deleteDisciplineRecord, getStudentDisciplineHistory,
@@ -61,6 +61,19 @@ export default guard(async (req, res) => {
     case 'students': {
       if (!cls || !Array.isArray(students)) return res.status(400).json({ error: 'bad list' });
       return res.status(200).json(await saveStudents(cls, students));
+    }
+
+    case 'updateStudent': {
+      if (!cls) return res.status(400).json({ error: 'cls required' });
+      const n = parseInt(no, 10);
+      if (!n) return res.status(400).json({ error: 'bad student number' });
+      const updatedNames = await updateStudent(cls, n, {
+        zh: body.zh,
+        en: body.en,
+        name: body.name,
+        sex: body.sex
+      });
+      return res.status(200).json({ ok: true, names: updatedNames });
     }
 
     case 'session': {

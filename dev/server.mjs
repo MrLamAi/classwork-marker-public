@@ -44,7 +44,7 @@ if (useMemory) {
 }
 
 process.env.AUTH_SECRET ||= 'dev-only-secret-not-for-production';
-process.env.APP_PASSCODE ||= 'dev';
+process.env.APP_PASSCODE ||= '20252026';
 
 /* --------------------------------------------------------------- handlers */
 

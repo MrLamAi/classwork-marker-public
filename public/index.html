@@ -145,8 +145,24 @@
         <div class="sh-head-profile">
           <div class="sh-avatar" id="shAvatar">#1</div>
           <div class="sh-info">
-            <h2 id="shTitle" class="sh-name">陳大文 <span class="sh-name-en" id="shNameEn">Chan Tai Man</span></h2>
-            <div class="sh-sub">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <h2 id="shTitle" class="sh-name" style="margin:0">陳大文 <span class="sh-name-en" id="shNameEn">Chan Tai Man</span></h2>
+              <button type="button" id="shEditNameToggleBtn" class="tool small-tool" style="padding:2px 8px;font-size:12px" title="修改此學生姓名">✏️ 更改名字</button>
+            </div>
+            <div id="shEditNameForm" hidden style="margin-top:8px;padding:8px 10px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line)">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <input type="text" id="shEditZh" class="text-input" placeholder="中文姓名" style="width:105px;padding:4px 6px;font-size:13px">
+                <input type="text" id="shEditEn" class="text-input" placeholder="English Name" style="width:135px;padding:4px 6px;font-size:13px">
+                <select id="shEditSex" class="text-input" style="width:auto;padding:4px 6px;font-size:13px">
+                  <option value="">— 性別 —</option>
+                  <option value="M">男 (M)</option>
+                  <option value="F">女 (F)</option>
+                </select>
+                <button type="button" id="shSaveNameBtn" class="tool primary small-tool" style="padding:4px 10px;font-size:12px">儲存</button>
+                <button type="button" id="shCancelNameBtn" class="tool small-tool" style="padding:4px 8px;font-size:12px">取消</button>
+              </div>
+            </div>
+            <div class="sh-sub" style="margin-top:4px">
               <span id="shClass">1A 班</span> · 
               <span id="shStudentNo">學號 1</span> · 
               <span id="shSeat">座位 #1</span> · 
@@ -622,7 +638,7 @@
 
   <div id="toasts" class="toasts"></div>
 
-  <script src="/schedule-data.js?v=20260915_01"></script>
-  <script src="/app.js?v=20260915_01"></script>
+  <script src="/schedule-data.js?v=20260917_01"></script>
+  <script src="/app.js?v=20260917_01"></script>
 </body>
 </html>

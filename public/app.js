@@ -379,6 +379,66 @@ function wire() {
     });
   }
 
+  // Student name inline edit in profile modal
+  if ($('shEditNameToggleBtn')) {
+    $('shEditNameToggleBtn').addEventListener('click', function () {
+      if (!currentShStudent) return;
+      var form = $('shEditNameForm');
+      if (!form) return;
+      var r = studentOf(currentShStudent);
+      if ($('shEditZh')) $('shEditZh').value = (r && r.zh) || '';
+      if ($('shEditEn')) $('shEditEn').value = (r && (r.en || (r.name !== r.zh ? r.name : ''))) || '';
+      if ($('shEditSex')) $('shEditSex').value = (r && r.sex) || '';
+      form.hidden = !form.hidden;
+      if (!form.hidden && $('shEditZh')) $('shEditZh').focus();
+    });
+  }
+
+  if ($('shCancelNameBtn')) {
+    $('shCancelNameBtn').addEventListener('click', function () {
+      if ($('shEditNameForm')) $('shEditNameForm').hidden = true;
+    });
+  }
+
+  if ($('shSaveNameBtn')) {
+    $('shSaveNameBtn').addEventListener('click', function () {
+      if (!currentShStudent) return;
+      var n = currentShStudent;
+      var zh = $('shEditZh') ? $('shEditZh').value.trim() : '';
+      var en = $('shEditEn') ? $('shEditEn').value.trim() : '';
+      var sex = $('shEditSex') ? $('shEditSex').value.trim() : '';
+
+      post({
+        action: 'updateStudent',
+        cls: S.cls,
+        no: n,
+        zh: zh,
+        en: en,
+        sex: sex
+      })
+        .then(function (res) {
+          if (res && res.names) {
+            S.names = res.names;
+          } else {
+            if (!S.names) S.names = {};
+            S.names[String(n)] = { zh: zh, en: en, name: en || zh, sex: sex };
+          }
+          var r = studentOf(n);
+          var nameZh = (r && r.zh) || '';
+          var nameEn = (r && (r.en || r.name)) || '';
+          var sexLabel = (r && r.sex) ? (r.sex === 'M' ? '男' : '女') : '';
+          $('shTitle').innerHTML = esc(nameZh || ('學生 #' + n)) +
+            (nameEn ? ' <span class="sh-name-en" id="shNameEn">' + esc(nameEn) + '</span>' : '');
+          $('shSex').textContent = sexLabel || '未設性別';
+          $('shSex').style.display = sexLabel ? 'inline-block' : 'none';
+          if ($('shEditNameForm')) $('shEditNameForm').hidden = true;
+          renderGrid();
+          toast('學生 #' + n + ' 姓名已更新', 'ok');
+        })
+        .catch(fail);
+    });
+  }
+
   // Settings modal tabs
   Array.prototype.forEach.call(document.querySelectorAll('[data-settab]'), function (btn) {
     btn.addEventListener('click', function () {
@@ -471,9 +531,6 @@ function wire() {
 
   Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
     b.addEventListener('click', function () { closeModal(b.dataset.close); });
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
-    b.addEventListener('click', function () { showTab(b.dataset.tab); });
   });
 
   // Class Management actions
@@ -1769,19 +1826,12 @@ function renderClassListTable() {
 }
 
 function showTab(name) {
-  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
-    b.classList.toggle('is-on', b.dataset.tab === name);
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('[data-pane]'), function (p) {
-    p.hidden = p.dataset.pane !== name;
-  });
-  var isRoster = (name === 'list');
-  $('rosterWipe').hidden = !isRoster;
-  $('rosterSave').hidden = !isRoster;
+  showSettingsTab(name);
 }
 
 function renderRoster() {
   var box = $('rosterList');
+  if (!box) return;
   box.innerHTML = '';
   var rosterTotal = S._rosterTotal || S.total;
 
@@ -1805,14 +1855,18 @@ function renderRoster() {
   }
 
   box.querySelectorAll('[data-f]').forEach(function (el) {
-    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () {
-      var no = el.closest('.rrow').dataset.no;
+    var onFieldInput = function () {
+      var row = el.closest('.rrow');
+      if (!row) return;
+      var no = row.dataset.no;
       var v = el.value.trim();
       var rec = rosterDraft[no] || (rosterDraft[no] = {});
       rec[el.dataset.f] = v;
       if (el.dataset.f === 'en') rec.name = v;
       if (!hasAnyName(rec)) delete rosterDraft[no];
-    });
+    };
+    el.addEventListener('input', onFieldInput);
+    el.addEventListener('change', onFieldInput);
   });
 
   var dragRow = null;
@@ -2027,10 +2081,39 @@ function applyParsedRoster(parsed) {
 }
 
 function saveRoster() {
-  var rosterTotal = S._rosterTotal || S.total;
   var saveCls = rosterEditCls || S.cls;
+  var rosterTotal = S._rosterTotal || S.total;
+
+  // Read latest input values directly from DOM to ensure any unsynced keystrokes/pastes are captured
+  var box = $('rosterList');
+  if (box) {
+    var rows = box.querySelectorAll('.rrow');
+    rows.forEach(function (row) {
+      var no = row.dataset.no;
+      var zhEl = row.querySelector('[data-f="zh"]');
+      var enEl = row.querySelector('[data-f="en"]');
+      var sexEl = row.querySelector('[data-f="sex"]');
+      var zh = zhEl ? zhEl.value.trim() : '';
+      var en = enEl ? enEl.value.trim() : '';
+      var sex = sexEl ? sexEl.value.trim() : '';
+      if (zh || en || sex) {
+        rosterDraft[no] = {
+          zh: zh,
+          en: en,
+          name: en || zh,
+          sex: sex
+        };
+      } else {
+        delete rosterDraft[no];
+      }
+    });
+  }
+
+  var allNos = Object.keys(rosterDraft).map(Number).filter(Boolean);
+  var maxLimit = Math.max(rosterTotal, allNos.length ? Math.max.apply(null, allNos) : 0);
+
   var list = [];
-  for (var n = 1; n <= rosterTotal; n++) {
+  for (var n = 1; n <= maxLimit; n++) {
     var rec = rosterDraft[n];
     if (rec && (rec.zh || rec.name || rec.en || rec.sex)) {
       list.push({
@@ -2042,15 +2125,17 @@ function saveRoster() {
       });
     }
   }
+
   post({ action: 'students', cls: saveCls, students: list })
     .then(function (names) {
       // If we saved to the current class, update in-memory names
       if (saveCls === S.cls) {
         S.names = names || {};
       }
+      closeModal('settingsModal');
       closeModal('classSetupModal');
       render();
-      toast(list.length + ' student records saved for ' + saveCls, 'ok');
+      toast(list.length + ' 位學生名單已成功儲存至 ' + saveCls + ' 班', 'ok');
     })
     .catch(fail);
 }
@@ -2251,6 +2336,7 @@ function openStudentHistoryModal(n) {
 
   $('shTodayDate').textContent = S.date || todayDateStr();
   $('shNoteInput').value = '';
+  if ($('shEditNameForm')) $('shEditNameForm').hidden = true;
 
   var isDone = !!(S.status && S.status[String(n)]);
   updateShClassworkBtn(isDone);
@@ -2456,6 +2542,7 @@ function openSettingsModal(tab) {
 
   // Tab 3: Roster
   rosterEditCls = S.cls;
+  S._rosterTotal = S.total;
   rosterDraft = {};
   for (var k in (S.names || {})) rosterDraft[k] = Object.assign({}, S.names[k]);
   populateClsSelectors();
@@ -2480,6 +2567,11 @@ function showSettingsTab(tab) {
   Array.prototype.forEach.call(document.querySelectorAll('[data-setpane]'), function (p) {
     p.hidden = (p.dataset.setpane !== tab);
   });
+  if (tab === 'roster') {
+    if ($('rosterSave')) $('rosterSave').hidden = false;
+    if ($('rosterWipe')) $('rosterWipe').hidden = false;
+    renderRoster();
+  }
 }
 
 function renderOverviewTab() {

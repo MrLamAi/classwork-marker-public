@@ -1,4 +1,4 @@
-﻿# 課堂座位表與課堂常規管理系統 (Classwork Marker Pro)
+# 課堂座位表與課堂常規管理系統 (Classwork Marker Pro)
 
 > 專為中小學及大專教師設計的現代化、輕量化、流動裝置友好的課堂座位管理與教學輔助系統。  
 > 老師可以在手機或平板電腦上實時點名、批改作業繳交狀態、記錄課堂行為印章；同時可一鍵切換「學生/投影機視角（旋轉 180°）」投屏至大螢幕，與學生視角完美一致。
@@ -32,7 +32,24 @@
 
 ---
 
-## 🚀 3 步零代碼部署指南 (Vercel + Neon Postgres)
+> 🌐 **線上體驗網址 (Live Demo)**: [https://classwork-marker-public.vercel.app/](https://classwork-marker-public.vercel.app/)  
+> 🔑 **體驗解鎖密碼**: `20252026`（已預載 1A 班示範名單、課桌排列與印章記錄，歡迎直接體驗！）
+
+---
+
+## 🛠️ 事前準備與資源需求 (Prerequisites & Options)
+
+本系統支援 3 種不同部署與使用方案，老師可依學校 IT 環境與個人偏好選擇：
+
+| 部署方案 | 適合對象 | 所需資源與帳號 | 優點與特性 |
+| :--- | :--- | :--- | :--- |
+| **方案 A：Vercel + Neon 雲端託管**<br>*(最推薦 / 零技術門檻)* | 一般中小學老師、科組共用、跨裝置教學 | 1. **GitHub 帳號**（免費）<br>2. **Vercel 帳號**（免費個人 Hobby Plan）<br>3. **Neon PostgreSQL**（於 Vercel 內一鍵免費開通） | • 零主機費用，全球 CDN 加速<br>• 手機、平板、電腦即時同步<br>• 自動 HTTPS 與免維護 |
+| **方案 B：Google 試算表 (GAS) 版**<br>*(Google Workspace 學校首選)* | 習慣使用 Google 試算表、完全不想註冊雲端服務的老師 | 1. **Google 帳號**（個人或校園 Google Workspace 帳號）<br>2. **Google 試算表 (Google Sheets)** | • 完全免註冊 GitHub 或 Vercel<br>• 資料直接存在試算表，匯入匯出方便<br>• 詳見 [apps-script/README.md](./apps-script/README.md) |
+| **方案 C：自建伺服器 / 本機離線版**<br>*(極致隱私 / 校內區域網路)* | 學校 IT 技術人員、電腦室內部獨立離線使用 | 1. **Node.js 20+** 或 **Docker**<br>2. 校內私有伺服器或本機電腦<br>3. （可選）自行架設的 PostgreSQL 或內建純記憶體 DB | • 100% 離線運作，資料不出校門<br>• 支援學校電腦室內部網路直接部署 |
+
+---
+
+## 🚀 3 步零代碼部署指南 (Vercel + Neon Postgres 方案)
 
 本系統使用 **Vercel Serverless Functions + Neon Serverless Postgres**，完全免費且無需伺服器維護費用。
 
@@ -51,7 +68,7 @@
 
 | 環境變數名稱 | 說明 | 範例值 |
 | :--- | :--- | :--- |
-| **`APP_PASSCODE`** | 教師登入密碼（建議設定簡短好記的密碼，方便在手機輸入） | `teach2026` |
+| **`APP_PASSCODE`** | 教師登入密碼（設定便於手機輸入的密碼） | `20252026` |
 | **`AUTH_SECRET`** | 用於簽署安全 Cookie 的 32 位元隨機字串 | 可在終端機執行 `openssl rand -base64 32`，或輸入隨機字串 |
 
 點擊 **Deploy**，約 30 秒即可完成發布！初次載入網頁時，資料庫會**自動建立資料表並載入 1A 與 2A 示範名單**，即可開始體驗！
@@ -83,7 +100,7 @@ npm run dev
 ```
 
 在瀏覽器打開 [http://localhost:3000](http://localhost:3000)：
-- 預設登入密碼：`dev`
+- 預設登入密碼：`20252026`（亦可在 `.env` 自訂）
 - 系統已預載 1A 班示範學生（陳大文、黃小明等 20 位學生）與課堂印章。
 
 ---

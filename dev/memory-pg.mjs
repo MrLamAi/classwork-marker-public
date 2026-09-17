@@ -14,9 +14,13 @@ const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMi
 /** Enough of a class to look real while designing: names on, a few handed in. */
 export function seed() {
   db.classes = [
-    { name: '1A', total: 40, cols: 8, seats: '' },
-    { name: '1B', total: 32, cols: 8, seats: '' },
-    { name: '2A', total: 36, cols: 6, seats: '' }
+    { name: '1A', total: 32, cols: 8, seats: '' },
+    { name: '1D', total: 32, cols: 8, seats: '' },
+    { name: '2A', total: 30, cols: 6, seats: '' },
+    { name: '2B', total: 32, cols: 8, seats: '' },
+    { name: '2C', total: 32, cols: 8, seats: '' },
+    { name: '2D', total: 32, cols: 8, seats: '' },
+    { name: '4C', total: 38, cols: 6, seats: '' }
   ];
 
   const roster = [
@@ -78,7 +82,9 @@ function exec(text, params = []) {
   if (q.includes('count(*)') && q.includes('from classes')) return [{ n: db.classes.length }];
 
   if (q.startsWith('insert into classes')) {
-    db.classes.push({ name: p[0], total: p[1], cols: p[2], seats: '' });
+    if (!db.classes.some((c) => c.name === p[0])) {
+      db.classes.push({ name: p[0], total: p[1], cols: p[2], seats: p[3] || '' });
+    }
     return [];
   }
 
@@ -110,12 +116,30 @@ function exec(text, params = []) {
       .map((s) => ({ no: s.no, name: s.name, name_zh: s.name_zh, name_en: s.name_en, sex: s.sex }));
 
   if (q.startsWith('delete from students')) {
-    db.students = db.students.filter((s) => s.class !== p[0]);
+    if (q.includes('and no = $2')) {
+      db.students = db.students.filter((s) => !(s.class === p[0] && s.no === p[1]));
+    } else {
+      db.students = db.students.filter((s) => s.class !== p[0]);
+    }
     return [];
   }
 
   if (q.startsWith('insert into students')) {
     const cls = p[0];
+    if (q.includes('on conflict (class, no) do update')) {
+      const existing = db.students.find((s) => s.class === cls && s.no === p[1]);
+      if (existing) {
+        existing.name = p[2];
+        existing.name_zh = p[3];
+        existing.name_en = p[4];
+        existing.sex = p[5];
+      } else {
+        db.students.push({
+          class: cls, no: p[1], name: p[2], name_zh: p[3], name_en: p[4], sex: p[5]
+        });
+      }
+      return [];
+    }
     for (let i = 1; i < p.length; i += 5) {
       db.students.push({
         class: cls, no: p[i], name: p[i + 1], name_zh: p[i + 2], name_en: p[i + 3], sex: p[i + 4]

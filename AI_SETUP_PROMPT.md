@@ -1,4 +1,4 @@
-﻿# 🤖 帶上你的專屬 AI 助手 (Bring Your Own AI Setup Prompt)
+# 🤖 帶上你的專屬 AI 助手 (Bring Your Own AI Setup Prompt)
 
 如果你是一位學校教師或初學者，沒有程式編寫背景，**請不要擔心！**
 你可以直接將下方的 **AI Prompt（引導提示詞）** 複製，貼到任何你常用的 AI 工具（例如 **ChatGPT、Claude、Google Gemini、Cursor、Copilot**）。
@@ -29,7 +29,7 @@ AI 助手會以繁體中文、溫柔且一步步地指導你完成所有設定�
 - 教我如何在 Vercel Marketplace 免費加入 Neon 資料庫，自動取得 DATABASE_URL。
 
 【任務三：設定環境變數 (Environment Variables)】
-- 告訴我需要設定哪兩個變數：APP_PASSCODE（老師手機登入密碼）與 AUTH_SECRET（安全驗證金鑰）。
+- 告訴我需要設定哪兩個變數：APP_PASSCODE（老師手機登入密碼，例如 20252026）與 AUTH_SECRET（安全驗證金鑰）。
 - 提供一個安全生成 AUTH_SECRET 的方法或幫我生成一組隨機字串。
 
 【任務四：一鍵部署與初次登入】
@@ -48,6 +48,7 @@ AI 助手會以繁體中文、溫柔且一步步地指導你完成所有設定�
 2. **Vercel 匯入**：登入 Vercel，點擊 **Import Project**。
 3. **儲存庫與密碼設定**：
    - 加入免費 **Neon Postgres**（自動綁定 `DATABASE_URL`）
-   - 設定 `APP_PASSCODE`（你的課堂登入密碼）
+   - 設定 `APP_PASSCODE`（你的課堂登入密碼，如 `20252026`）
    - 設定 `AUTH_SECRET`（安全金鑰）
 4. **上線使用**：點擊 Deploy，在手機加入主畫面，即可開始在課堂上點名、貼印章、排座位！
+   - *（你也可以先參考線上 Demo：[https://classwork-marker-public.vercel.app/](https://classwork-marker-public.vercel.app/)，解鎖密碼 `20252026`）*
