@@ -79,6 +79,16 @@ function exec(text, params = []) {
   if (/^(begin|commit|rollback)$/.test(q)) return [];
   if (q.startsWith('create table') || q.startsWith('alter table') || q.startsWith('create index')) return [];
 
+  if (q.includes('select class, count(*)') && q.includes('from students')) {
+    const counts = {};
+    for (const s of db.students) counts[s.class] = (counts[s.class] || 0) + 1;
+    return Object.entries(counts).map(([cls, n]) => ({ class: cls, n }));
+  }
+  if (q.includes('select class, count(*)') && q.includes('from discipline_records')) {
+    const counts = {};
+    for (const d of (db.discipline || [])) counts[d.class] = (counts[d.class] || 0) + 1;
+    return Object.entries(counts).map(([cls, n]) => ({ class: cls, n }));
+  }
   if (q.includes('count(*)') && q.includes('from classes')) return [{ n: db.classes.length }];
   if (q.includes('count(*)') && q.includes('from students')) {
     if (q.includes('where class = $1')) return [{ n: db.students.filter((s) => s.class === p[0]).length }];
@@ -152,23 +162,29 @@ function exec(text, params = []) {
   }
 
   if (q.startsWith('insert into students')) {
-    const cls = p[0];
     if (q.includes('on conflict (class, no)')) {
-      const existing = db.students.find((s) => s.class === cls && s.no === p[1]);
-      if (existing) {
-        if (q.includes('do update')) {
-          existing.name = p[2];
-          existing.name_zh = p[3];
-          existing.name_en = p[4];
-          existing.sex = p[5];
+      for (let i = 0; i < p.length; i += 6) {
+        const cls = p[i];
+        const no = p[i + 1];
+        const name = p[i + 2];
+        const name_zh = p[i + 3];
+        const name_en = p[i + 4];
+        const sex = p[i + 5];
+        const existing = db.students.find((s) => s.class === cls && s.no === no);
+        if (existing) {
+          if (q.includes('do update')) {
+            existing.name = name;
+            existing.name_zh = name_zh;
+            existing.name_en = name_en;
+            existing.sex = sex;
+          }
+        } else {
+          db.students.push({ class: cls, no, name, name_zh, name_en, sex });
         }
-      } else {
-        db.students.push({
-          class: cls, no: p[1], name: p[2], name_zh: p[3], name_en: p[4], sex: p[5]
-        });
       }
       return [];
     }
+    const cls = p[0];
     for (let i = 1; i < p.length; i += 5) {
       db.students.push({
         class: cls, no: p[i], name: p[i + 1], name_zh: p[i + 2], name_en: p[i + 3], sex: p[i + 4]
@@ -186,8 +202,11 @@ function exec(text, params = []) {
   }
 
   if (q.startsWith('insert into sessions')) {
-    if (db.sessions.some((s) => s.id === p[0])) return [];       // on conflict do nothing
-    db.sessions.push({ id: p[0], class: p[1], name: p[2], created_at: new Date() });
+    for (let i = 0; i < p.length; i += 3) {
+      if (!db.sessions.some((s) => s.id === p[i])) {
+        db.sessions.push({ id: p[i], class: p[i + 1], name: p[i + 2], created_at: new Date() });
+      }
+    }
     return [{ id: p[0] }];
   }
 
@@ -204,12 +223,14 @@ function exec(text, params = []) {
   }
 
   if (q.startsWith('insert into marks')) {
-    let m = db.marks.find((x) => x.session_id === p[0] && x.student_no === p[1]);
-    if (!m) {
-      m = { session_id: p[0], student_no: p[1], marked_at: new Date() };
-      db.marks.push(m);
+    for (let i = 0; i < p.length; i += 2) {
+      let m = db.marks.find((x) => x.session_id === p[i] && x.student_no === p[i + 1]);
+      if (!m) {
+        m = { session_id: p[i], student_no: p[i + 1], marked_at: new Date() };
+        db.marks.push(m);
+      }
     }
-    return [{ t: hhmm(m.marked_at) }];
+    return [{ t: hhmm(new Date()) }];
   }
 
   if (q.startsWith('delete from marks where session_id')) {
@@ -274,30 +295,34 @@ function exec(text, params = []) {
   }
 
   if (q.startsWith('insert into discipline_records')) {
-    const newRec = {
-      id: String((db.discipline || []).length + 1),
-      class: p[0],
-      student_no: p[1],
-      record_date: p[2],
-      record_time: p[3] || '',
-      type: p[4],
-      label: p[5],
-      note: p[6] || '',
-      created_at: new Date()
-    };
     db.discipline = db.discipline || [];
-    db.discipline.unshift(newRec);
-    return [{
-      id: newRec.id,
-      class: newRec.class,
-      student_no: newRec.student_no,
-      date: newRec.record_date,
-      time: newRec.record_time,
-      type: newRec.type,
-      label: newRec.label,
-      note: newRec.note,
-      created_at: newRec.created_at
-    }];
+    const inserted = [];
+    for (let i = 0; i < p.length; i += 7) {
+      const newRec = {
+        id: String(db.discipline.length + 1),
+        class: p[i],
+        student_no: p[i + 1],
+        record_date: p[i + 2],
+        record_time: p[i + 3] || '',
+        type: p[i + 4],
+        label: p[i + 5],
+        note: p[i + 6] || '',
+        created_at: new Date()
+      };
+      db.discipline.unshift(newRec);
+      inserted.push({
+        id: newRec.id,
+        class: newRec.class,
+        student_no: newRec.student_no,
+        date: newRec.record_date,
+        time: newRec.record_time,
+        type: newRec.type,
+        label: newRec.label,
+        note: newRec.note,
+        created_at: newRec.created_at
+      });
+    }
+    return inserted;
   }
 
   if (q.startsWith('delete from discipline_records where id = $1')) {
@@ -337,12 +362,14 @@ function exec(text, params = []) {
 
   if (q.startsWith('insert into class_lessons')) {
     db.lessons = db.lessons || [];
-    const cls = p[0], date = p[1], note = p[2] || '';
-    const existing = db.lessons.find((l) => l.class === cls && l.lesson_date === date);
-    if (existing) {
-      existing.note = note;
-    } else {
-      db.lessons.push({ class: cls, lesson_date: date, note: note, created_at: new Date() });
+    for (let i = 0; i < p.length; i += 3) {
+      const cls = p[i], date = p[i + 1], note = p[i + 2] || '';
+      const existing = db.lessons.find((l) => l.class === cls && l.lesson_date === date);
+      if (existing) {
+        existing.note = note;
+      } else {
+        db.lessons.push({ class: cls, lesson_date: date, note: note, created_at: new Date() });
+      }
     }
     return [];
   }

@@ -1567,17 +1567,27 @@
     activeClassProfile = prof;
   }
 
+  function getStorage() {
+    try {
+      if (typeof localStorage !== 'undefined') return localStorage;
+      if (typeof window !== 'undefined' && window.localStorage) return window.localStorage;
+      if (typeof globalThis !== 'undefined' && globalThis.localStorage) return globalThis.localStorage;
+    } catch (e) {}
+    return null;
+  }
+
   function loadPersistedData() {
     try {
-      if (typeof localStorage !== 'undefined') {
-        var savedSched = localStorage.getItem(STORAGE_KEY_SCHEDULE);
+      var store = getStorage();
+      if (store) {
+        var savedSched = store.getItem(STORAGE_KEY_SCHEDULE);
         if (savedSched) {
           var parsedSched = JSON.parse(savedSched);
           if (parsedSched && typeof parsedSched === 'object') {
             activeSchedule = parsedSched;
           }
         }
-        var savedCal = localStorage.getItem(STORAGE_KEY_CALENDAR);
+        var savedCal = store.getItem(STORAGE_KEY_CALENDAR);
         if (savedCal) {
           var parsedCal = JSON.parse(savedCal);
           if (parsedCal && Array.isArray(parsedCal.cycleDays) && parsedCal.cycleDays.length > 0) {
@@ -1607,11 +1617,12 @@
     activeSchedule = cleanSched;
     rebuildClassProfile();
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY_SCHEDULE, JSON.stringify(activeSchedule));
+      var store = getStorage();
+      if (store) {
+        store.setItem(STORAGE_KEY_SCHEDULE, JSON.stringify(activeSchedule));
       }
     } catch (e) {
-      console.warn('[ScheduleEngine] Failed to save schedule to localStorage:', e);
+      console.warn('[ScheduleEngine] Failed to save schedule to storage:', e);
     }
     return true;
   }
@@ -1620,18 +1631,20 @@
     activeSchedule = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
     rebuildClassProfile();
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(STORAGE_KEY_SCHEDULE);
+      var store = getStorage();
+      if (store) {
+        store.removeItem(STORAGE_KEY_SCHEDULE);
       }
     } catch (e) {
-      console.warn('[ScheduleEngine] Failed to remove schedule from localStorage:', e);
+      console.warn('[ScheduleEngine] Failed to remove schedule from storage:', e);
     }
     return true;
   }
 
   function isCustomSchedule() {
     try {
-      return !!(typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_SCHEDULE));
+      var store = getStorage();
+      return !!(store && store.getItem(STORAGE_KEY_SCHEDULE));
     } catch (e) {
       return false;
     }
@@ -1647,14 +1660,15 @@
       : {};
     rebuildDateIndex();
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY_CALENDAR, JSON.stringify({
+      var store = getStorage();
+      if (store) {
+        store.setItem(STORAGE_KEY_CALENDAR, JSON.stringify({
           cycleDays: activeCycleDays,
           nonCycleEvents: activeNonCycleEvents
         }));
       }
     } catch (e) {
-      console.warn('[ScheduleEngine] Failed to save calendar to localStorage:', e);
+      console.warn('[ScheduleEngine] Failed to save calendar to storage:', e);
     }
     return true;
   }
@@ -1664,18 +1678,20 @@
     activeNonCycleEvents = JSON.parse(JSON.stringify(DEFAULT_NON_CYCLE_EVENTS));
     rebuildDateIndex();
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(STORAGE_KEY_CALENDAR);
+      var store = getStorage();
+      if (store) {
+        store.removeItem(STORAGE_KEY_CALENDAR);
       }
     } catch (e) {
-      console.warn('[ScheduleEngine] Failed to remove calendar from localStorage:', e);
+      console.warn('[ScheduleEngine] Failed to remove calendar from storage:', e);
     }
     return true;
   }
 
   function isCustomCalendar() {
     try {
-      return !!(typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_CALENDAR));
+      var store = getStorage();
+      return !!(store && store.getItem(STORAGE_KEY_CALENDAR));
     } catch (e) {
       return false;
     }

@@ -3,8 +3,8 @@
 (function () {
 'use strict';
 
-var APP_VERSION = '2.5.0';
-var APP_COMMIT  = '6854ad0';
+var APP_VERSION = '2.5.1';
+var APP_COMMIT  = 'e5038ec';
 
 /* =============================================================== state */
 
@@ -320,38 +320,10 @@ function wire() {
   if ($('dateSel')) $('dateSel').addEventListener('change', function () { load(S.cls, '', this.value).catch(fail); });
 
   if ($('datePickerBtn')) {
-    $('datePickerBtn').addEventListener('click', function (e) {
-      e.stopPropagation();
-      var menu = $('dateDropdownMenu');
-      if (menu) menu.hidden = !menu.hidden;
+    $('datePickerBtn').addEventListener('click', function () {
+      openDateNoticeModal();
     });
   }
-
-  var dateDropMenu = $('dateDropdownMenu');
-  if (dateDropMenu) {
-    dateDropMenu.addEventListener('click', function (e) {
-      var btnDate = e.target.closest('[data-jump-date]');
-      if (btnDate && btnDate.dataset.jumpDate) {
-        dateDropMenu.hidden = true;
-        load(S.cls, '', btnDate.dataset.jumpDate).catch(fail);
-        return;
-      }
-      var btnCls = e.target.closest('[data-jump-class]');
-      if (btnCls && btnCls.dataset.jumpClass) {
-        dateDropMenu.hidden = true;
-        load(btnCls.dataset.jumpClass, '', S ? S.date : '').catch(fail);
-        return;
-      }
-    });
-  }
-
-  document.addEventListener('click', function (e) {
-    var wrap = $('dateFieldWrap');
-    if (wrap && !wrap.contains(e.target)) {
-      var menu = $('dateDropdownMenu');
-      if (menu) menu.hidden = true;
-    }
-  });
 
   var schedBanner = $('scheduleNoticeBanner');
   if (schedBanner) {
@@ -1065,7 +1037,7 @@ function renderBar() {
     $('datePickerText').textContent = S.date || today;
   }
 
-  var menuItems = $('dateMenuItems');
+  var menuItems = $('dateModalItems');
   if (menuItems) {
     menuItems.innerHTML = sortedDates.map(function (d) {
       var label = d;
@@ -1115,7 +1087,7 @@ function renderBar() {
 function renderScheduleBanner() {
   var banner = $('scheduleNoticeBanner');
   var badge = $('dateNoticeBadge');
-  var warnBox = $('dateMenuWarningBox');
+  var warnBox = $('dateModalNoticeBox');
   if (!window.ScheduleEngine || !S) return;
 
   var curDate = S.date || todayDateStr();
@@ -1232,14 +1204,59 @@ function renderScheduleBanner() {
     }
   }
 
+  var bannerModClass = '';
+  if (!cycleInfo || !cycleInfo.isSchoolCycleDay) {
+    bannerModClass = ' is-holiday';
+  } else if (classLessonsToday.length === 0) {
+    bannerModClass = ' is-off-schedule';
+  } else if (isToday && periodInfo && periodInfo.isCurrent) {
+    var activeLsn = allLessonsToday.find(function (l) { return l.period === periodInfo.period; });
+    if (activeLsn && ScheduleEngine.matchClass(S.cls, activeLsn.class)) {
+      bannerModClass = ' is-active';
+    } else if (activeLsn) {
+      bannerModClass = ' is-suggest';
+    }
+  }
+
   if (warnBox) {
-    warnBox.innerHTML = '<div class="schedule-banner" style="margin:0;border:none">' + leftHtml + rightHtml + '</div>';
+    warnBox.hidden = false;
+    warnBox.innerHTML = '<div class="schedule-banner' + bannerModClass + '" style="margin:0;border:none">' + leftHtml + rightHtml + '</div>';
     warnBox.style.display = 'block';
   }
 
   if (banner) {
     banner.innerHTML = leftHtml + rightHtml;
   }
+}
+
+/* Open the date-notice modal and wire up click events inside it */
+function openDateNoticeModal() {
+  renderScheduleBanner(); // ensure notice box and items are fresh
+  openModal('dateNoticeModal');
+  var modal = $('dateNoticeModal');
+  if (!modal) return;
+  // Wire item clicks inside the modal (delegated, safe to rebind each open)
+  var body = modal.querySelector('.modal-body');
+  if (body) {
+    body.onclick = function (e) {
+      var btnDate = e.target.closest('[data-jump-date]');
+      if (btnDate && btnDate.dataset.jumpDate) {
+        closeModal('dateNoticeModal');
+        load(S ? S.cls : '', '', btnDate.dataset.jumpDate).catch(fail);
+        return;
+      }
+      var btnCls = e.target.closest('[data-jump-class]');
+      if (btnCls && btnCls.dataset.jumpClass) {
+        closeModal('dateNoticeModal');
+        load(btnCls.dataset.jumpClass, '', S ? S.date : '').catch(fail);
+      }
+    };
+  }
+}
+
+/* Refresh the schedule banner / badge after timetable or calendar changes */
+function checkScheduleForToday() {
+  renderScheduleBanner();
 }
 
 function updateMeter() {

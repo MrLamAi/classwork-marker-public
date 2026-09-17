@@ -1655,6 +1655,58 @@ body:not(.module-discipline) .floating-stamp-toolbox {
   color: var(--brand-dark);
 }
 
+/* Date Notice Modal */
+.date-modal-notice-box {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.date-modal-notice-box .schedule-banner {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: none;
+}
+.date-modal-notice-box .schedule-banner-left,
+.date-modal-notice-box .schedule-banner-right {
+  width: 100%;
+}
+.date-modal-notice-box .schedule-banner-right {
+  justify-content: flex-start;
+}
+.date-modal-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 14px 16px 6px;
+}
+.date-modal-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 16px 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.date-modal-items .date-menu-item {
+  padding: 10px 12px;
+  font-size: 13.5px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.date-modal-items .date-menu-item:hover {
+  background: var(--surface-2);
+  border-color: var(--line-2);
+}
+.date-modal-items .date-menu-item.is-selected {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand-dark);
+}
+
 /* ===================================================== class management tab */
 .class-mgmt-layout {
   display: grid;

@@ -69,11 +69,6 @@
           <span class="date-arrow">▾</span>
         </button>
         <select id="dateSel" style="display:none"></select>
-        <div id="dateDropdownMenu" class="date-dropdown-menu" hidden>
-          <div id="dateMenuWarningBox" class="date-menu-warning-box" hidden></div>
-          <div class="date-menu-title">課堂開課日期</div>
-          <div id="dateMenuItems" class="date-menu-items"></div>
-        </div>
       </div>
     </div>
 
@@ -161,7 +156,22 @@
     </main>
   </div>
 
-  <!-- ------------------------------------------- student history & record modal -->
+  <!-- ------------------------------------------- date notice modal -->
+  <div class="backdrop" id="dateNoticeModal" hidden style="z-index:125">
+    <div class="modal medium-modal" role="dialog" aria-modal="true" aria-labelledby="dateModalTitle">
+      <div class="modal-head">
+        <h2 id="dateModalTitle">📅 課堂日期與通知</h2>
+        <button class="icon-btn ghost" data-close="dateNoticeModal" aria-label="關閉">×</button>
+      </div>
+      <div class="modal-body" style="padding:0">
+        <div id="dateModalNoticeBox" class="date-modal-notice-box" hidden></div>
+        <div class="date-modal-section-title">選擇課堂日期</div>
+        <div id="dateModalItems" class="date-modal-items"></div>
+      </div>
+    </div>
+  </div>
+
+
   <div class="backdrop" id="studentHistoryModal" hidden style="z-index:120">
     <div class="modal medium-modal" role="dialog" aria-modal="true" aria-labelledby="shTitle">
       <div class="modal-head">
@@ -890,7 +900,7 @@ Date,DayName,Cycle,CycleDay,TimetableType,Event
 
       <div class="modal-foot" style="display:flex;align-items:center;justify-content:space-between;width:100%">
         <div class="settings-version-tag" id="settingsVersionTag" style="font-size:11px;color:var(--muted);font-family:var(--font-mono,ui-monospace,monospace);letter-spacing:0.2px">
-          ver. 2.5.0 · <span id="settingsCommitHash">6854ad0</span>
+          ver. 2.5.1 · <span id="settingsCommitHash">e5038ec</span>
         </div>
         <button type="button" class="tool primary" data-close="settingsModal">完成 / 關閉</button>
       </div>
@@ -1014,7 +1024,7 @@ Date,DayName,Cycle,CycleDay,TimetableType,Event
 
   <div id="toasts" class="toasts"></div>
 
-  <script src="/schedule-data.js?v=20260917_02"></script>
-  <script src="/app.js?v=20260917_02"></script>
+  <script src="/schedule-data.js?v=20260917_03"></script>
+  <script src="/app.js?v=20260917_03"></script>
 </body>
 </html>
