@@ -446,9 +446,11 @@ function wire() {
     });
   });
 
-  // Overview tab actions
+  // Overview tab & export actions
   if ($('copySummaryBtn')) $('copySummaryBtn').addEventListener('click', copyLogSummary);
-  if ($('exportLogCsvBtn')) $('exportLogCsvBtn').addEventListener('click', exportLogCsv);
+  if ($('exportLogCsvBtn')) $('exportLogCsvBtn').addEventListener('click', openExportModal);
+  if ($('exportRecordsBtn')) $('exportRecordsBtn').addEventListener('click', openExportModal);
+  if ($('confirmExportBtn')) $('confirmExportBtn').addEventListener('click', performExport);
   if ($('clearDateDisciplineBtn')) $('clearDateDisciplineBtn').addEventListener('click', clearDateDiscipline);
   if ($('overviewConfirmLessonBtn')) $('overviewConfirmLessonBtn').addEventListener('click', toggleConfirmLesson);
   if ($('overviewPrevDateSel')) $('overviewPrevDateSel').addEventListener('change', function () {
@@ -2726,54 +2728,339 @@ function copyLogSummary() {
   }
 }
 
-function exportLogCsv() {
+var DISCIPLINE_TYPE_LABELS = {
+  no_hw: '欠交功課',
+  no_book: '欠帶課本',
+  sleeping: '課堂睡覺',
+  talking: '說話分心',
+  good_perf: '積極答問',
+  warning: '違規警告'
+};
+
+function openExportModal() {
   if (!S) return;
   var curDate = S.date || todayDateStr();
-  var stats = (S.discipline && S.discipline.studentStats) ? S.discipline.studentStats : {};
-  var totalStudents = S.total;
+  if ($('exportClsBadge')) $('exportClsBadge').textContent = S.cls;
+  if ($('exportDateBadge')) $('exportDateBadge').textContent = curDate;
+  openModal('exportModal');
+}
 
-  var lines = [];
-  lines.push('班別,學號,中文姓名,英文姓名,性別,欠交功課次數,欠帶課本次數,課堂睡覺次數,說話分心次數,積極答問次數,違規警告次數,課堂作業狀態,記錄日期');
+function performExport() {
+  if (!S) return;
+  var scopeEl = document.querySelector('input[name="exportScope"]:checked');
+  var formatEl = document.querySelector('input[name="exportFormat"]:checked');
+  var scope = scopeEl ? scopeEl.value : 'daily';
+  var format = formatEl ? formatEl.value : 'xls';
 
-  for (var i = 1; i <= totalStudents; i++) {
-    var st = stats[String(i)];
-    var badges = st ? (st.today_badges || []) : [];
-    var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
-    badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
+  closeModal('exportModal');
 
-    var isDone = !!(S.status && S.status[String(i)]);
-    var r = studentOf(i);
-    var zh = (r && r.zh) || '';
-    var en = (r && (r.en || r.name)) || '';
-
-    lines.push([
-      csvCell(S.cls),
-      csvCell(i),
-      csvCell(zh),
-      csvCell(en),
-      csvCell(r ? r.sex : ''),
-      csvCell(c.no_hw),
-      csvCell(c.no_book),
-      csvCell(c.sleeping),
-      csvCell(c.talking),
-      csvCell(c.good_perf),
-      csvCell(c.warning),
-      csvCell(isDone ? ('已繳交 (' + S.status[String(i)] + ')') : '未繳交'),
-      csvCell(curDate)
-    ].join(','));
+  if (scope === 'daily') {
+    exportDailyReport(format);
+  } else if (scope === 'cumulative') {
+    exportCumulativeReport(format);
+  } else if (scope === 'detailed') {
+    exportDetailedRecords(format);
   }
+}
 
+function downloadCsv(lines, filename) {
   var csvContent = '\uFEFF' + lines.join('\r\n');
   var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url;
-  a.download = 'LessonReport_' + S.cls + '_' + curDate + '.csv';
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('當日 CSV 報表匯出完成', 'ok');
+  toast('已匯出：' + filename, 'ok');
+}
+
+function downloadXls(tableHtml, title, filename) {
+  var template = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">' +
+    '<head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>' +
+    '<x:Name>' + esc(title || '工作表') + '</x:Name>' +
+    '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
+    '<style>' +
+    'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft JhengHei", "PingFang TC", sans-serif; font-size: 11pt; padding: 12px; }' +
+    'table { border-collapse: collapse; width: 100%; margin-top: 10px; }' +
+    'th { background-color: #2563eb; color: #ffffff; font-weight: bold; border: 1px solid #1d4ed8; padding: 7px 10px; text-align: center; }' +
+    'td { border: 1px solid #cbd5e1; padding: 6px 9px; font-size: 11pt; }' +
+    'tr:nth-child(even) td { background-color: #f8fafc; }' +
+    '.center { text-align: center; }' +
+    '.num { text-align: center; mso-number-format: "\\@"; }' +
+    '.alert-text { color: #dc2626; font-weight: bold; }' +
+    '.good-text { color: #16a34a; font-weight: bold; }' +
+    '</style></head>' +
+    '<body>' +
+    '<h2 style="margin:0 0 6px;font-size:15pt;color:#1e293b">' + esc(title) + '</h2>' +
+    '<div style="margin-bottom:12px;color:#64748b;font-size:10pt">班別：' + esc(S.cls) + ' ｜ 匯出時間：' + new Date().toLocaleString() + '</div>' +
+    tableHtml +
+    '</body></html>';
+
+  var blob = new Blob([template], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('已匯出：' + filename, 'ok');
+}
+
+function exportDailyReport(format) {
+  if (!S) return;
+  var curDate = S.date || todayDateStr();
+  var stats = (S.discipline && S.discipline.studentStats) ? S.discipline.studentStats : {};
+  var totalStudents = S.total;
+  var filename = '課堂日誌_' + S.cls + '_' + curDate + '.' + format;
+  var title = S.cls + ' 班課堂日誌報表（' + curDate + '）';
+
+  if (format === 'csv') {
+    var lines = [];
+    lines.push('班別,學號,中文姓名,英文姓名,性別,欠交功課,欠帶課本,課堂睡覺,說話分心,積極答問,違規警告,今日違規小計,課堂作業狀態,上堂欠交提示,上堂欠帶提示,記錄日期');
+    for (var i = 1; i <= totalStudents; i++) {
+      var st = stats[String(i)];
+      var badges = st ? (st.today_badges || []) : [];
+      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
+      badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
+      var totalInfractions = c.no_hw + c.no_book + c.sleeping + c.talking + c.warning;
+      var isDone = !!(S.status && S.status[String(i)]);
+      var r = studentOf(i);
+      var zh = (r && r.zh) || '';
+      var en = (r && (r.en || r.name)) || '';
+      var sex = (r && r.sex) || '';
+      var prevHw = (st && st.previous_alerts && st.previous_alerts.no_hw) ? '上一堂亦欠交' : '';
+      var prevBook = (st && st.previous_alerts && st.previous_alerts.no_book) ? '上一堂亦欠帶' : '';
+
+      lines.push([
+        csvCell(S.cls),
+        csvCell(i),
+        csvCell(zh),
+        csvCell(en),
+        csvCell(sex),
+        csvCell(c.no_hw),
+        csvCell(c.no_book),
+        csvCell(c.sleeping),
+        csvCell(c.talking),
+        csvCell(c.good_perf),
+        csvCell(c.warning),
+        csvCell(totalInfractions),
+        csvCell(isDone ? ('已繳交 (' + S.status[String(i)] + ')') : '未繳交'),
+        csvCell(prevHw),
+        csvCell(prevBook),
+        csvCell(curDate)
+      ].join(','));
+    }
+    downloadCsv(lines, filename);
+  } else {
+    var html = '<table><thead><tr>' +
+      '<th>班別</th><th>學號</th><th>中文姓名</th><th>英文姓名</th><th>性別</th>' +
+      '<th>欠交功課</th><th>欠帶課本</th><th>課堂睡覺</th><th>說話分心</th><th>積極答問</th><th>違規警告</th>' +
+      '<th>今日違規小計</th><th>課堂作業狀態</th><th>上堂欠交提示</th><th>上堂欠帶提示</th><th>記錄日期</th>' +
+      '</tr></thead><tbody>';
+
+    for (var i = 1; i <= totalStudents; i++) {
+      var st = stats[String(i)];
+      var badges = st ? (st.today_badges || []) : [];
+      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
+      badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
+      var totalInfractions = c.no_hw + c.no_book + c.sleeping + c.talking + c.warning;
+      var isDone = !!(S.status && S.status[String(i)]);
+      var r = studentOf(i);
+      var zh = (r && r.zh) || '';
+      var en = (r && (r.en || r.name)) || '';
+      var sex = (r && r.sex) || '';
+      var prevHw = (st && st.previous_alerts && st.previous_alerts.no_hw) ? '上一堂亦欠交' : '';
+      var prevBook = (st && st.previous_alerts && st.previous_alerts.no_book) ? '上一堂亦欠帶' : '';
+
+      html += '<tr>' +
+        '<td class="center">' + esc(S.cls) + '</td>' +
+        '<td class="num">' + i + '</td>' +
+        '<td>' + esc(zh) + '</td>' +
+        '<td>' + esc(en) + '</td>' +
+        '<td class="center">' + esc(sex) + '</td>' +
+        '<td class="center' + (c.no_hw > 0 ? ' alert-text' : '') + '">' + c.no_hw + '</td>' +
+        '<td class="center' + (c.no_book > 0 ? ' alert-text' : '') + '">' + c.no_book + '</td>' +
+        '<td class="center' + (c.sleeping > 0 ? ' alert-text' : '') + '">' + c.sleeping + '</td>' +
+        '<td class="center' + (c.talking > 0 ? ' alert-text' : '') + '">' + c.talking + '</td>' +
+        '<td class="center' + (c.good_perf > 0 ? ' good-text' : '') + '">' + c.good_perf + '</td>' +
+        '<td class="center' + (c.warning > 0 ? ' alert-text' : '') + '">' + c.warning + '</td>' +
+        '<td class="center' + (totalInfractions > 0 ? ' alert-text' : '') + '">' + totalInfractions + '</td>' +
+        '<td class="center">' + esc(isDone ? ('已繳交 (' + S.status[String(i)] + ')') : '未繳交') + '</td>' +
+        '<td class="center' + (prevHw ? ' alert-text' : '') + '">' + esc(prevHw) + '</td>' +
+        '<td class="center' + (prevBook ? ' alert-text' : '') + '">' + esc(prevBook) + '</td>' +
+        '<td class="center">' + esc(curDate) + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    downloadXls(html, title, filename);
+  }
+}
+
+function exportCumulativeReport(format) {
+  if (!S) return;
+  var curDate = S.date || todayDateStr();
+  var stats = (S.discipline && S.discipline.studentStats) ? S.discipline.studentStats : {};
+  var totalStudents = S.total;
+  var filename = '學期紀律累計總表_' + S.cls + '_' + curDate + '.' + format;
+  var title = S.cls + ' 班學期紀律累計總表（截至 ' + curDate + '）';
+
+  if (format === 'csv') {
+    var lines = [];
+    lines.push('班別,學號,中文姓名,英文姓名,性別,累計欠交功課,累計欠帶課本,累計課堂睡覺,累計說話分心,累計違規警告,累計違規總數,累計積極答問,統計截至日期');
+    for (var i = 1; i <= totalStudents; i++) {
+      var st = stats[String(i)];
+      var tot = (st && st.totals) ? st.totals : { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, total_infractions: 0 };
+      var r = studentOf(i);
+      var zh = (r && r.zh) || '';
+      var en = (r && (r.en || r.name)) || '';
+      var sex = (r && r.sex) || '';
+
+      lines.push([
+        csvCell(S.cls),
+        csvCell(i),
+        csvCell(zh),
+        csvCell(en),
+        csvCell(sex),
+        csvCell(tot.no_hw || 0),
+        csvCell(tot.no_book || 0),
+        csvCell(tot.sleeping || 0),
+        csvCell(tot.talking || 0),
+        csvCell(tot.warning || 0),
+        csvCell(tot.total_infractions || 0),
+        csvCell(tot.good_perf || 0),
+        csvCell(curDate)
+      ].join(','));
+    }
+    downloadCsv(lines, filename);
+  } else {
+    var html = '<table><thead><tr>' +
+      '<th>班別</th><th>學號</th><th>中文姓名</th><th>英文姓名</th><th>性別</th>' +
+      '<th>累計欠交功課</th><th>累計欠帶課本</th><th>累計課堂睡覺</th><th>累計說話分心</th><th>累計違規警告</th><th>累計違規總數</th>' +
+      '<th>累計積極答問</th><th>統計截至日期</th>' +
+      '</tr></thead><tbody>';
+
+    for (var i = 1; i <= totalStudents; i++) {
+      var st = stats[String(i)];
+      var tot = (st && st.totals) ? st.totals : { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, total_infractions: 0 };
+      var r = studentOf(i);
+      var zh = (r && r.zh) || '';
+      var en = (r && (r.en || r.name)) || '';
+      var sex = (r && r.sex) || '';
+
+      html += '<tr>' +
+        '<td class="center">' + esc(S.cls) + '</td>' +
+        '<td class="num">' + i + '</td>' +
+        '<td>' + esc(zh) + '</td>' +
+        '<td>' + esc(en) + '</td>' +
+        '<td class="center">' + esc(sex) + '</td>' +
+        '<td class="center' + ((tot.no_hw || 0) > 0 ? ' alert-text' : '') + '">' + (tot.no_hw || 0) + '</td>' +
+        '<td class="center' + ((tot.no_book || 0) > 0 ? ' alert-text' : '') + '">' + (tot.no_book || 0) + '</td>' +
+        '<td class="center' + ((tot.sleeping || 0) > 0 ? ' alert-text' : '') + '">' + (tot.sleeping || 0) + '</td>' +
+        '<td class="center' + ((tot.talking || 0) > 0 ? ' alert-text' : '') + '">' + (tot.talking || 0) + '</td>' +
+        '<td class="center' + ((tot.warning || 0) > 0 ? ' alert-text' : '') + '">' + (tot.warning || 0) + '</td>' +
+        '<td class="center' + ((tot.total_infractions || 0) > 0 ? ' alert-text' : '') + '">' + (tot.total_infractions || 0) + '</td>' +
+        '<td class="center' + ((tot.good_perf || 0) > 0 ? ' good-text' : '') + '">' + (tot.good_perf || 0) + '</td>' +
+        '<td class="center">' + esc(curDate) + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    downloadXls(html, title, filename);
+  }
+}
+
+function exportDetailedRecords(format) {
+  if (!S) return;
+  var curDate = S.date || todayDateStr();
+  var records = (S.discipline && S.discipline.allRecords) ? S.discipline.allRecords : null;
+
+  if (!records) {
+    busy(true);
+    post({ action: 'getClassHistory', cls: S.cls }).then(function (res) {
+      busy(false);
+      var recs = (res && res.records) || [];
+      if (S.discipline) S.discipline.allRecords = recs;
+      doDetailedExport(recs, format, curDate);
+    }).catch(function () {
+      busy(false);
+      doDetailedExport(S.dateEvents || [], format, curDate);
+    });
+  } else {
+    doDetailedExport(records, format, curDate);
+  }
+}
+
+function doDetailedExport(records, format, curDate) {
+  var filename = '全班歷次紀律詳細流水帳_' + S.cls + '_' + curDate + '.' + format;
+  var title = S.cls + ' 班全班歷次紀律詳細流水帳';
+
+  if (!records || records.length === 0) {
+    toast('目前尚無全班歷次紀律明細記錄可供匯出', 'bad');
+    return;
+  }
+
+  if (format === 'csv') {
+    var lines = [];
+    lines.push('記錄日期,記錄時間,班別,學號,中文姓名,英文姓名,性別,紀律項目類別,項目標籤,備註說明');
+    records.forEach(function (rec) {
+      var r = studentOf(rec.student_no);
+      var zh = (r && r.zh) || '';
+      var en = (r && (r.en || r.name)) || '';
+      var sex = (r && r.sex) || '';
+      var typeName = DISCIPLINE_TYPE_LABELS[rec.type] || rec.type || '';
+
+      lines.push([
+        csvCell(rec.date),
+        csvCell(rec.time || ''),
+        csvCell(rec.class || S.cls),
+        csvCell(rec.student_no),
+        csvCell(zh),
+        csvCell(en),
+        csvCell(sex),
+        csvCell(typeName),
+        csvCell(rec.label || ''),
+        csvCell(rec.note || '')
+      ].join(','));
+    });
+    downloadCsv(lines, filename);
+  } else {
+    var html = '<table><thead><tr>' +
+      '<th>記錄日期</th><th>記錄時間</th><th>班別</th><th>學號</th><th>中文姓名</th><th>英文姓名</th><th>性別</th>' +
+      '<th>紀律項目類別</th><th>項目標籤</th><th>備註說明</th>' +
+      '</tr></thead><tbody>';
+
+    records.forEach(function (rec) {
+      var r = studentOf(rec.student_no);
+      var zh = (r && r.zh) || '';
+      var en = (r && (r.en || r.name)) || '';
+      var sex = (r && r.sex) || '';
+      var typeName = DISCIPLINE_TYPE_LABELS[rec.type] || rec.type || '';
+      var isGood = rec.type === 'good_perf';
+
+      html += '<tr>' +
+        '<td class="center">' + esc(rec.date) + '</td>' +
+        '<td class="center">' + esc(rec.time || '') + '</td>' +
+        '<td class="center">' + esc(rec.class || S.cls) + '</td>' +
+        '<td class="num">' + esc(rec.student_no) + '</td>' +
+        '<td>' + esc(zh) + '</td>' +
+        '<td>' + esc(en) + '</td>' +
+        '<td class="center">' + esc(sex) + '</td>' +
+        '<td class="center' + (isGood ? ' good-text' : ' alert-text') + '">' + esc(typeName) + '</td>' +
+        '<td>' + esc(rec.label || '') + '</td>' +
+        '<td>' + esc(rec.note || '') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    downloadXls(html, title, filename);
+  }
+}
+
+function exportLogCsv() {
+  openExportModal();
 }
 
 function clearDateDiscipline() {

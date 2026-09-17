@@ -89,6 +89,7 @@
       <button id="namesBtn" class="tool" title="切換姓名顯示方式（中文 / English / 中+En / 關閉）">姓名: 中</button>
       <button id="layoutBtn" class="tool" title="進入拖曳或調整座位模式">編輯座次 / Edit Layout</button>
       <button id="confirmLessonBtn" class="tool lesson-confirm-btn" title="登記當日課堂已進行（全員紀律良好，無違規記錄）">🟢 本堂全員良好</button>
+      <button id="exportRecordsBtn" class="tool" title="匯出當前班別課堂記錄 (CSV / XLS Excel 報表)">💾 匯出報表</button>
       <span class="spacer"></span>
       <button id="clearBtn" class="tool quiet-danger" title="清空目前的作業繳交勾選">清空作業標記</button>
     </div>
@@ -265,8 +266,9 @@
             </div>
             <div class="overview-actions">
               <button type="button" id="copySummaryBtn" class="tool">📋 複製文字摘要</button>
-              <button type="button" id="exportLogCsvBtn" class="tool primary">💾 匯出 CSV 報表</button>
+              <button type="button" id="exportLogCsvBtn" class="tool primary">💾 匯出記錄報表</button>
               <button type="button" id="clearDateDisciplineBtn" class="tool quiet-danger">清空當日紀律記錄</button>
+            </div>
           <div class="overview-calibration-card" style="margin:10px 0 12px;padding:9px 12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
             <div style="display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap">
               <span>📅 <b>上一堂參考日期：</b></span>
@@ -587,6 +589,72 @@
     </div>
   </div>
 
+  <!-- ------------------------------------------------ export modal dialog -->
+  <div class="backdrop" id="exportModal" hidden style="z-index:120">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle" style="max-width:540px">
+      <div class="modal-head">
+        <h2 id="exportModalTitle">💾 匯出班別課堂記錄 (CSV / XLS)</h2>
+        <button class="icon-btn ghost" data-close="exportModal" aria-label="關閉">&times;</button>
+      </div>
+
+      <div class="modal-body" style="padding:16px 20px">
+        <div style="margin-bottom:14px;padding:10px 14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line);font-size:13px;display:flex;gap:18px;align-items:center">
+          <div>🏫 <b>班別：</b><span id="exportClsBadge" class="badge" style="font-weight:bold;font-size:13px"></span></div>
+          <div>📅 <b>日期：</b><span id="exportDateBadge" style="font-weight:bold"></span></div>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--text)">1. 選擇匯出報表內容：</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r-sm);cursor:pointer;background:var(--surface)">
+              <input type="radio" name="exportScope" value="daily" checked style="margin-top:3px">
+              <div>
+                <div style="font-weight:600;font-size:13px">📋 當日課堂日誌報表</div>
+                <div class="muted" style="font-size:12px;margin-top:2px">包含每位學生今日之課堂作業繳交狀態與時間、今日各項違規/加分統計、連續欠交欠帶提示。</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r-sm);cursor:pointer;background:var(--surface)">
+              <input type="radio" name="exportScope" value="cumulative" style="margin-top:3px">
+              <div>
+                <div style="font-weight:600;font-size:13px">📊 學期累計統計總表</div>
+                <div class="muted" style="font-size:12px;margin-top:2px">全班每位學生於整個學期的欠交功課、欠帶課本、課堂睡覺、說話分心、加分等累計總次數。</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r-sm);cursor:pointer;background:var(--surface)">
+              <input type="radio" name="exportScope" value="detailed" style="margin-top:3px">
+              <div>
+                <div style="font-weight:600;font-size:13px">📜 全班歷次詳細流水帳</div>
+                <div class="muted" style="font-size:12px;margin-top:2px">開學至今所有課堂日期的完整逐筆違規或加分明細、記錄時間及備註說明。</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <div style="font-weight:600;margin-bottom:8px;font-size:13px;color:var(--text)">2. 選擇檔案格式：</div>
+          <div style="display:flex;gap:12px">
+            <label style="display:flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid var(--line);border-radius:var(--r-sm);cursor:pointer;flex:1;background:var(--surface)">
+              <input type="radio" name="exportFormat" value="xls" checked>
+              <span>📗 <b>Excel 試算表 (.xls)</b></span>
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid var(--line);border-radius:var(--r-sm);cursor:pointer;flex:1;background:var(--surface)">
+              <input type="radio" name="exportFormat" value="csv">
+              <span>📄 <b>CSV 檔案 (.csv)</b></span>
+            </label>
+          </div>
+          <div class="muted" style="font-size:11px;margin-top:6px">
+            💡 兩種格式均已設定 UTF-8 編碼與相容格式，於 Windows Excel、Mac Numbers 或 Google 試算表開啟繁體中文均不會出現亂碼。
+          </div>
+        </div>
+
+        <div class="modal-foot" style="padding:12px 0 0;margin-top:14px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px">
+          <button type="button" class="tool" data-close="exportModal">取消</button>
+          <button type="button" id="confirmExportBtn" class="tool primary">💾 立即匯出下載</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ------------------------------------------------------- import modal dialog -->
   <div class="backdrop" id="importModal" hidden style="z-index:120">
     <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
@@ -638,7 +706,7 @@
 
   <div id="toasts" class="toasts"></div>
 
-  <script src="/schedule-data.js?v=20260917_01"></script>
-  <script src="/app.js?v=20260917_01"></script>
+  <script src="/schedule-data.js?v=20260917_02"></script>
+  <script src="/app.js?v=20260917_02"></script>
 </body>
 </html>

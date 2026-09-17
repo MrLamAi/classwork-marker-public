@@ -5,7 +5,8 @@ import {
   createClass, deleteClass, updateClass,
   recordLessonEvent, deleteLessonEvent, clearLessonEvents,
   recordDiscipline, deleteDisciplineRecord, getStudentDisciplineHistory,
-  clearClassDisciplineForDate, confirmLesson, deleteLessonDate
+  clearClassDisciplineForDate, confirmLesson, deleteLessonDate,
+  getClassDisciplineHistory
 } from '../lib/db.js';
 
 /**
@@ -154,6 +155,12 @@ export default guard(async (req, res) => {
     case 'deleteLessonDate': {
       if (!cls) return res.status(400).json({ error: 'class required' });
       return res.status(200).json(await deleteLessonDate(cls, date));
+    }
+
+    case 'getClassHistory': {
+      if (!cls) return res.status(400).json({ error: 'class required' });
+      const records = await getClassDisciplineHistory(cls);
+      return res.status(200).json({ ok: true, records });
     }
 
     default:
