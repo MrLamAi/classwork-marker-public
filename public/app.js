@@ -44,7 +44,8 @@ var disciplinePrefsDefaults = {
   enableFloatingBar: true,
   floatingCollapsed: false,
   floatingChips: ['no_hw', 'no_book', 'sleeping', 'talking', 'good_perf', 'warning'],
-  badgeMode: 'icons' // 'icons' | 'count' | 'off'
+  badgeMode: 'icons', // 'icons' | 'count' | 'off'
+  badgePos: 'top-right' // 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left' | 'floating-right'
 };
 var disciplinePrefs = loadDisciplinePrefs();
 
@@ -57,7 +58,8 @@ function loadDisciplinePrefs() {
         enableFloatingBar: p.enableFloatingBar !== undefined ? !!p.enableFloatingBar : true,
         floatingCollapsed: !!p.floatingCollapsed,
         floatingChips: Array.isArray(p.floatingChips) ? p.floatingChips : disciplinePrefsDefaults.floatingChips,
-        badgeMode: p.badgeMode || 'icons'
+        badgeMode: p.badgeMode || 'icons',
+        badgePos: p.badgePos || 'top-right'
       };
     }
   } catch (e) {}
@@ -70,11 +72,11 @@ function saveDisciplinePrefs() {
 
 /* Tile design configuration - persisted in localStorage */
 var tileDesignDefaults = {
-  topleft:  { field: 'seat',    size: 10 },
-  topright: { field: 'none',    size: 10 },
-  main:     { field: 'classno', size: 32 },
-  bottom:   { field: 'name',    size: 12 },
-  time:     { field: 'time',    size: 12 }
+  topleft:  { field: 'seat',    size: 10, align: 'left' },
+  topright: { field: 'none',    size: 10, align: 'right' },
+  main:     { field: 'classno', size: 32, align: 'center' },
+  bottom:   { field: 'name',    size: 12, align: 'center' },
+  time:     { field: 'time',    size: 12, align: 'center' }
 };
 var tileDesign = loadTileDesign();
 
@@ -86,7 +88,12 @@ function loadTileDesign() {
       // merge with defaults for any missing keys
       var out = {};
       for (var k in tileDesignDefaults) {
-        out[k] = d[k] ? { field: d[k].field || tileDesignDefaults[k].field, size: d[k].size || tileDesignDefaults[k].size } : { field: tileDesignDefaults[k].field, size: tileDesignDefaults[k].size };
+        var def = tileDesignDefaults[k];
+        out[k] = {
+          field: (d[k] && d[k].field !== undefined) ? d[k].field : def.field,
+          size: (d[k] && d[k].size !== undefined) ? d[k].size : def.size,
+          align: (d[k] && d[k].align !== undefined) ? d[k].align : (def.align || 'center')
+        };
       }
       return out;
     }
