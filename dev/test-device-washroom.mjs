@@ -22,8 +22,12 @@ console.log('=== 2. Checking public/styles.css Animations & Indicators ===');
 const stylesCss = fs.readFileSync('public/styles.css', 'utf8');
 assert(stylesCss.includes('@keyframes washroom-pulse'), 'Must define washroom-pulse keyframes');
 assert(stylesCss.includes('.tile.in-washroom'), 'Must define .tile.in-washroom');
-assert(stylesCss.includes('animation: washroom-pulse 2s infinite ease-in-out'), 'Must use 2s infinite ease-in-out pulse');
+assert(stylesCss.includes('animation: washroom-pulse 5s infinite ease-in-out'), 'Must use 5s infinite ease-in-out pulse');
+// Ensure NO transform/scaling in washroom-pulse to prevent shifting the seating chart
+const keyframesMatch = stylesCss.match(/@keyframes washroom-pulse\s*\{[\s\S]*?\n\}/);
+assert(keyframesMatch && !keyframesMatch[0].includes('scale'), 'Keyframes MUST NOT scale cards');
 assert(stylesCss.includes('.tile-washroom-indicator'), 'Must define .tile-washroom-indicator');
+assert(stylesCss.includes('.twi-elapsed'), 'Must define .twi-elapsed for second line timer');
 assert(stylesCss.includes('.badge-device'), 'Must define badge-device');
 assert(stylesCss.includes('.badge-washroom'), 'Must define badge-washroom');
 
@@ -42,6 +46,9 @@ assert(appJs.includes("chips.indexOf('device') === -1"), 'Must auto-migrate devi
 assert(appJs.includes("chips.indexOf('washroom') === -1"), 'Must auto-migrate washroom chip if missing from saved preferences');
 assert(appJs.includes("tagEl.textContent = '自選';"), 'Must set default tag to 自選');
 assert(stylesCss.includes('.fs-current-tag'), 'Must define .fs-current-tag styling');
+assert(appJs.includes('function getElapsedWashroomMinutes('), 'Must define getElapsedWashroomMinutes');
+assert(appJs.includes("twi-elapsed"), 'Must render twi-elapsed in indicator');
+assert(appJs.includes('已過 '), 'Must include 已過 X 分鐘 format in indicator');
 
 console.log('=== 4. Checking Database & Action Backend Handling ===');
 import { register } from 'node:module';

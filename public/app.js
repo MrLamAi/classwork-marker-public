@@ -3,8 +3,8 @@
 (function () {
 'use strict';
 
-var APP_VERSION = '2.6.1';
-var APP_COMMIT  = '97121c0';
+var APP_VERSION = '2.6.2';
+var APP_COMMIT  = 'a74e7db';
 
 /* =============================================================== state */
 
@@ -1461,7 +1461,7 @@ function paintTile(b, n) {
     }
   }
 
-  // Washroom active state (2-second slow pulse gradient yellow)
+  // Washroom active state (5-second slow pulse gradient yellow, zero size change)
   var isInWashroom = !!(activeWashrooms && activeWashrooms[key]);
   b.classList.toggle('in-washroom', isInWashroom);
 
@@ -1477,8 +1477,10 @@ function paintTile(b, n) {
       b.appendChild(wIndicator);
     }
     var wInfo = activeWashrooms[key] || {};
-    wIndicator.textContent = '🚻 ' + (wInfo.startTime || '') + ' 離席中';
-    wIndicator.title = '正在上洗手間（自 ' + (wInfo.startTime || '') + ' 離席），點擊記錄已回課室';
+    var elapsed = getElapsedWashroomMinutes(wInfo);
+    wIndicator.innerHTML = '<span class="twi-time">🚻 ' + esc(wInfo.startTime || '') + ' 離席</span>' +
+      '<span class="twi-elapsed">已過 ' + elapsed + ' 分鐘</span>';
+    wIndicator.title = '正在上洗手間（自 ' + (wInfo.startTime || '') + ' 離席，已過 ' + elapsed + ' 分鐘），點擊記錄已回課室';
   } else if (wIndicator) {
     wIndicator.remove();
   }
@@ -2530,15 +2532,63 @@ function syncActiveWashrooms() {
   }
 }
 
+function getElapsedWashroomMinutes(wInfo) {
+  if (!wInfo) return 0;
+  var now = Date.now();
+  if (wInfo.startTimestamp && !isNaN(wInfo.startTimestamp)) {
+    var diffMs = now - Number(wInfo.startTimestamp);
+    return Math.max(0, Math.floor(diffMs / 60000));
+  }
+  if (wInfo.startTime) {
+    var parts = String(wInfo.startTime).split(':');
+    if (parts.length === 2) {
+      var d = new Date();
+      var sMin = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+      var curMin = d.getHours() * 60 + d.getMinutes();
+      return Math.max(0, curMin - sMin);
+    }
+  }
+  return 0;
+}
+
+function updateWashroomElapsedTimers() {
+  if (!activeWashrooms || !Object.keys(activeWashrooms).length) return;
+  for (var key in activeWashrooms) {
+    var wInfo = activeWashrooms[key];
+    var elapsed = getElapsedWashroomMinutes(wInfo);
+    var tile = document.querySelector('.tile[data-n="' + key + '"]');
+    if (tile) {
+      var ind = tile.querySelector('.tile-washroom-indicator');
+      if (ind) {
+        var elSpan = ind.querySelector('.twi-elapsed');
+        if (elSpan) {
+          elSpan.textContent = '已過 ' + elapsed + ' 分鐘';
+        } else {
+          ind.innerHTML = '<span class="twi-time">🚻 ' + esc(wInfo.startTime || '') + ' 離席</span>' +
+            '<span class="twi-elapsed">已過 ' + elapsed + ' 分鐘</span>';
+        }
+        ind.title = '正在上洗手間（自 ' + (wInfo.startTime || '') + ' 離席，已過 ' + elapsed + ' 分鐘），點擊記錄已回課室';
+      }
+    }
+  }
+  if ($('studentHistoryModal') && !$('studentHistoryModal').hidden && currentShStudent) {
+    updateShWashroomBtnState(currentShStudent);
+  }
+}
+
+// Check and update elapsed minutes dynamically every 10 seconds
+setInterval(updateWashroomElapsedTimers, 10000);
+
 function updateShWashroomBtnState(n) {
   var shWBtn = $('shWashroomBtn');
   if (!shWBtn) return;
   var isOut = !!(activeWashrooms && activeWashrooms[String(n)]);
   if (isOut) {
     var wInfo = activeWashrooms[String(n)] || {};
+    var elapsed = getElapsedWashroomMinutes(wInfo);
     shWBtn.classList.add('is-active-washroom');
-    shWBtn.innerHTML = '<span class="sh-qbtn-icon">🚻</span> 記錄已回課室 (' + (wInfo.startTime || '') + ' 離席)';
-    shWBtn.title = '點擊標記已回課室（自 ' + (wInfo.startTime || '') + ' 離席）';
+    shWBtn.innerHTML = '<span class="sh-qbtn-icon">🚻</span> 記錄已回課室 (' + (wInfo.startTime || '') + ' 離席 · 已過 ' + elapsed + ' 分鐘)';
+    shWBtn.title = '點擊標記已回課室（自 ' + (wInfo.startTime || '') + ' 離席，已過 ' + elapsed + ' 分鐘）';
   } else {
     shWBtn.classList.remove('is-active-washroom');
     shWBtn.innerHTML = '<span class="sh-qbtn-icon">🚻</span> 上洗手間';

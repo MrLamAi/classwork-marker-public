@@ -966,27 +966,26 @@ body.module-discipline:not(.edit-mode):not(.view-mode) .tools.normal {
 .t-badge.badge-device { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
 .t-badge.badge-washroom { background: #fefce8; border-color: #fde047; color: #854d0e; }
 
-/* ------------------------------------------- Washroom active slow pulse (2-second gradient yellow) */
+/* ------------------------------------------- Washroom active slow pulse (5-second gradient yellow, zero size change) */
 @keyframes washroom-pulse {
   0%, 100% {
     background: linear-gradient(135deg, #fef08a 0%, #fde047 100%);
-    box-shadow: 0 0 0 2px #eab308, 0 4px 10px rgba(234, 179, 8, 0.35);
     border-color: #ca8a04;
-    transform: scale(1);
+    box-shadow: inset 0 0 0 1px rgba(202, 138, 4, 0.45), 0 2px 5px rgba(202, 138, 4, 0.2);
   }
   50% {
     background: linear-gradient(135deg, #fef9c3 0%, #fef08a 100%);
-    box-shadow: 0 0 0 5px rgba(234, 179, 8, 0.4), 0 6px 14px rgba(234, 179, 8, 0.5);
     border-color: #eab308;
-    transform: scale(1.02);
+    box-shadow: inset 0 0 0 1px rgba(234, 179, 8, 0.3), 0 2px 5px rgba(234, 179, 8, 0.12);
   }
 }
 
 .tile.in-washroom {
-  animation: washroom-pulse 2s infinite ease-in-out !important;
-  border: 2px solid #ca8a04 !important;
+  animation: washroom-pulse 5s infinite ease-in-out !important;
+  border: 1px solid #ca8a04 !important;
   position: relative;
   z-index: 10;
+  box-sizing: border-box;
 }
 
 .tile.in-washroom .t-num,
@@ -1001,25 +1000,37 @@ body.module-discipline:not(.edit-mode):not(.view-mode) .tools.normal {
   bottom: 2px;
   left: 50%;
   transform: translateX(-50%);
-  background: #a16207;
+  background: #854d0e;
   color: #fef08a;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 99px;
+  padding: 2px 7px;
+  border-radius: 6px;
   white-space: nowrap;
   pointer-events: auto;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   cursor: pointer;
   z-index: 5;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  transition: transform .15s ease, background .15s ease;
+  justify-content: center;
+  line-height: 1.22;
+  text-align: center;
+  transition: background 0.15s ease;
 }
 .tile-washroom-indicator:hover {
-  background: #78350f;
-  transform: translateX(-50%) scale(1.06);
+  background: #713f12;
+}
+.tile-washroom-indicator .twi-time {
+  font-weight: 800;
+  color: #fef9c3;
+  letter-spacing: 0.2px;
+}
+.tile-washroom-indicator .twi-elapsed {
+  font-size: 9px;
+  color: #fde047;
+  font-weight: 700;
 }
 
 .tile.done .t-badge {
@@ -1375,7 +1386,7 @@ body:not(.module-discipline) .floating-stamp-toolbox {
   border-color: #ca8a04;
   color: #854d0e;
   font-weight: 800;
-  animation: washroom-pulse 2s infinite ease-in-out;
+  animation: washroom-pulse 5s infinite ease-in-out;
 }
 
 /* Interactive Filter Chips */
