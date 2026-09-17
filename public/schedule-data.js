@@ -19,8 +19,8 @@
 })(typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : this)), function () {
   'use strict';
 
-  // Master 150 Cycle Days
-  var CYCLE_DAYS = [
+  // Master Default 150 Cycle Days
+  var DEFAULT_CYCLE_DAYS = [
   {
     "date": "2026-09-02",
     "dayName": "Wed",
@@ -1223,14 +1223,9 @@
   }
 ];
 
-  // Date index for O(1) lookup
-  var CYCLE_DATE_MAP = {};
-  CYCLE_DAYS.forEach(function (d) {
-    CYCLE_DATE_MAP[d.date] = d;
-  });
 
-  // Non-cycle events (holidays, special days)
-  var NON_CYCLE_EVENTS = {
+  // Master Default non-cycle events (holidays, special days)
+  var DEFAULT_NON_CYCLE_EVENTS = {
   "2026-09-01": "First Day of School",
   "2026-09-19": "PTA Orientation Activity Day",
   "2026-09-26": "The Day following the Mid-Autumn Festival",
@@ -1431,8 +1426,8 @@
     }
   };
 
-  // Master Timetable definition by Cycle Day A-F
-  var SCHEDULE = {
+  // Master Default Timetable definition by Cycle Day A-F
+  var DEFAULT_SCHEDULE = {
     A: [
       { period: 2, class: '2D', rawClass: 'CpLit 2D', subject: '中國語文及文化', room: '502' },
       { period: 3, class: '2D', rawClass: 'CpLit 2D', subject: '中國語文及文化', room: '502' }
@@ -1463,8 +1458,8 @@
     ]
   };
 
-  // Class Profile & designated regular cycle days
-  var CLASS_PROFILE = {
+  // Master Default Class Profile & designated regular cycle days
+  var DEFAULT_CLASS_PROFILE = {
     '1A': { fullName: '1A (中化)', subject: '中國語文及文化', defaultRoom: '502', regularDays: ['C'], summary: 'Day C 第 7–8 堂 (502室)' },
     '1D': { fullName: '1D (中化)', subject: '中國語文及文化', defaultRoom: '502', regularDays: ['B'], summary: 'Day B 第 2–3 堂 (502室)' },
     '2A': { fullName: '2A (中化)', subject: '中國語文及文化', defaultRoom: '502', regularDays: ['C'], summary: 'Day C 第 4–5 堂 (502室)' },
@@ -1473,6 +1468,17 @@
     '2D': { fullName: '2D (中化/生涯)', subject: '中化 (Day A) / 生涯規劃 (Day F)', defaultRoom: '502 / 204', regularDays: ['A', 'F'], summary: 'Day A 第 2–3 堂 (502室), Day F 第 7–8 堂 (204室)' },
     '4C': { fullName: '4C (公社科)', subject: '公民與社會發展科', defaultRoom: '303 / 308', regularDays: ['B', 'E'], summary: 'Day B 第 1 堂 (303室) & 第 4 堂 (308室), Day E 第 6 堂 (303室)' }
   };
+
+  /* ----------------------------------------------------------- active state & persistence */
+
+  var STORAGE_KEY_SCHEDULE = 'cm_custom_schedule';
+  var STORAGE_KEY_CALENDAR = 'cm_custom_calendar';
+
+  var activeCycleDays = JSON.parse(JSON.stringify(DEFAULT_CYCLE_DAYS));
+  var activeNonCycleEvents = JSON.parse(JSON.stringify(DEFAULT_NON_CYCLE_EVENTS));
+  var activeSchedule = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+  var activeClassProfile = JSON.parse(JSON.stringify(DEFAULT_CLASS_PROFILE));
+  var activeCycleDateMap = {};
 
   /* ----------------------------------------------------------- helpers */
 
@@ -1499,13 +1505,405 @@
     return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
   }
 
+  function rebuildDateIndex() {
+    activeCycleDateMap = {};
+    activeCycleDays.forEach(function (d) {
+      if (d && d.date) {
+        activeCycleDateMap[d.date] = d;
+      }
+    });
+  }
+
+  function rebuildClassProfile() {
+    var prof = {};
+    var days = ['A', 'B', 'C', 'D', 'E', 'F'];
+    days.forEach(function (d) {
+      var list = activeSchedule[d] || [];
+      list.forEach(function (item) {
+        var cls = normalizeClass(item.class);
+        if (!cls) return;
+        if (!prof[cls]) {
+          prof[cls] = {
+            fullName: cls + (item.subject ? ' (' + item.subject + ')' : ''),
+            subject: item.subject || '',
+            defaultRoom: item.room || '',
+            regularDays: [],
+            summary: ''
+          };
+        }
+        if (prof[cls].regularDays.indexOf(d) === -1) {
+          prof[cls].regularDays.push(d);
+        }
+        if (item.room && !prof[cls].defaultRoom) {
+          prof[cls].defaultRoom = item.room;
+        }
+      });
+    });
+
+    // Merge default class profiles for fallback
+    Object.keys(DEFAULT_CLASS_PROFILE).forEach(function (cls) {
+      if (!prof[cls]) {
+        prof[cls] = JSON.parse(JSON.stringify(DEFAULT_CLASS_PROFILE[cls]));
+      }
+    });
+
+    // Build summaries
+    Object.keys(prof).forEach(function (cls) {
+      var p = prof[cls];
+      var slotSummaries = [];
+      days.forEach(function (d) {
+        var slots = (activeSchedule[d] || []).filter(function (l) { return matchClass(cls, l.class); });
+        if (slots.length > 0) {
+          var pNums = slots.map(function (s) { return s.period; }).sort(function (a, b) { return a - b; });
+          var r = slots[0].room || p.defaultRoom || '';
+          slotSummaries.push('Day ' + d + ' 第 ' + pNums.join(', ') + ' 堂' + (r ? ' (' + r + '室)' : ''));
+        }
+      });
+      if (slotSummaries.length > 0) {
+        p.summary = slotSummaries.join(', ');
+      }
+    });
+
+    activeClassProfile = prof;
+  }
+
+  function loadPersistedData() {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        var savedSched = localStorage.getItem(STORAGE_KEY_SCHEDULE);
+        if (savedSched) {
+          var parsedSched = JSON.parse(savedSched);
+          if (parsedSched && typeof parsedSched === 'object') {
+            activeSchedule = parsedSched;
+          }
+        }
+        var savedCal = localStorage.getItem(STORAGE_KEY_CALENDAR);
+        if (savedCal) {
+          var parsedCal = JSON.parse(savedCal);
+          if (parsedCal && Array.isArray(parsedCal.cycleDays) && parsedCal.cycleDays.length > 0) {
+            activeCycleDays = parsedCal.cycleDays;
+            if (parsedCal.nonCycleEvents && typeof parsedCal.nonCycleEvents === 'object') {
+              activeNonCycleEvents = parsedCal.nonCycleEvents;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[ScheduleEngine] Could not load persisted overrides:', e);
+    }
+    rebuildDateIndex();
+    rebuildClassProfile();
+  }
+
+  function setSchedule(newSchedule) {
+    if (!newSchedule || typeof newSchedule !== 'object') {
+      throw new Error('課表資料格式無效');
+    }
+    var days = ['A', 'B', 'C', 'D', 'E', 'F'];
+    var cleanSched = {};
+    days.forEach(function (d) {
+      cleanSched[d] = Array.isArray(newSchedule[d]) ? newSchedule[d] : [];
+    });
+    activeSchedule = cleanSched;
+    rebuildClassProfile();
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY_SCHEDULE, JSON.stringify(activeSchedule));
+      }
+    } catch (e) {
+      console.warn('[ScheduleEngine] Failed to save schedule to localStorage:', e);
+    }
+    return true;
+  }
+
+  function resetSchedule() {
+    activeSchedule = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    rebuildClassProfile();
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY_SCHEDULE);
+      }
+    } catch (e) {
+      console.warn('[ScheduleEngine] Failed to remove schedule from localStorage:', e);
+    }
+    return true;
+  }
+
+  function isCustomSchedule() {
+    try {
+      return !!(typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_SCHEDULE));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setCalendar(cycleDays, nonCycleEvents) {
+    if (!Array.isArray(cycleDays) || cycleDays.length === 0) {
+      throw new Error('校曆必須包含至少一個有效循環日');
+    }
+    activeCycleDays = JSON.parse(JSON.stringify(cycleDays));
+    activeNonCycleEvents = (nonCycleEvents && typeof nonCycleEvents === 'object')
+      ? JSON.parse(JSON.stringify(nonCycleEvents))
+      : {};
+    rebuildDateIndex();
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY_CALENDAR, JSON.stringify({
+          cycleDays: activeCycleDays,
+          nonCycleEvents: activeNonCycleEvents
+        }));
+      }
+    } catch (e) {
+      console.warn('[ScheduleEngine] Failed to save calendar to localStorage:', e);
+    }
+    return true;
+  }
+
+  function resetCalendar() {
+    activeCycleDays = JSON.parse(JSON.stringify(DEFAULT_CYCLE_DAYS));
+    activeNonCycleEvents = JSON.parse(JSON.stringify(DEFAULT_NON_CYCLE_EVENTS));
+    rebuildDateIndex();
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(STORAGE_KEY_CALENDAR);
+      }
+    } catch (e) {
+      console.warn('[ScheduleEngine] Failed to remove calendar from localStorage:', e);
+    }
+    return true;
+  }
+
+  function isCustomCalendar() {
+    try {
+      return !!(typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_CALENDAR));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function parseCalendarCsv(csvText) {
+    if (!csvText || typeof csvText !== 'string' || !csvText.trim()) {
+      return { error: '請提供有效的校曆 CSV 或文字內容' };
+    }
+    var rawLines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    var lines = [];
+    for (var i = 0; i < rawLines.length; i++) {
+      var l = rawLines[i].trim();
+      if (l) lines.push(l);
+    }
+    if (lines.length === 0) {
+      return { error: '校曆文字內容為空' };
+    }
+
+    var firstLine = lines[0];
+    var delimiter = (firstLine.indexOf('\t') !== -1 && firstLine.split('\t').length >= 3) ? '\t' : ',';
+
+    function splitLine(line) {
+      if (delimiter === '\t') return line.split('\t').map(function (s) { return s.trim(); });
+      var res = [];
+      var cur = '';
+      var inQuotes = false;
+      for (var c = 0; c < line.length; c++) {
+        var ch = line[c];
+        if (ch === '"') {
+          if (inQuotes && line[c + 1] === '"') {
+            cur += '"';
+            c++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (ch === ',' && !inQuotes) {
+          res.push(cur.trim());
+          cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      res.push(cur.trim());
+      return res;
+    }
+
+    var hCols = splitLine(firstLine).map(function (s) { return s.toLowerCase().replace(/[\s_\-]/g, ''); });
+    var colMap = { date: -1, dayName: -1, cycle: -1, cycleDay: -1, tt: -1, event: -1 };
+
+    for (var cIdx = 0; cIdx < hCols.length; cIdx++) {
+      var col = hCols[cIdx];
+      if (col.indexOf('date') !== -1 || col.indexOf('日期') !== -1) colMap.date = cIdx;
+      else if (col.indexOf('dayname') !== -1 || col.indexOf('weekday') !== -1 || col.indexOf('星期') !== -1) colMap.dayName = cIdx;
+      else if (col === 'cycle' || col.indexOf('循環週') !== -1 || col.indexOf('週次') !== -1) colMap.cycle = cIdx;
+      else if (col.indexOf('cycleday') !== -1 || col === 'day' || col.indexOf('循環日') !== -1 || col.indexOf('日次') !== -1) colMap.cycleDay = cIdx;
+      else if (col.indexOf('timetable') !== -1 || col === 'tt' || col.indexOf('類型') !== -1 || col.indexOf('模式') !== -1 || col.indexOf('時間表') !== -1) colMap.tt = cIdx;
+      else if (col.indexOf('event') !== -1 || col.indexOf('holiday') !== -1 || col.indexOf('活動') !== -1 || col.indexOf('假期') !== -1 || col.indexOf('備註') !== -1) colMap.event = cIdx;
+    }
+
+    var startLineIdx = 0;
+    if (colMap.date !== -1 || colMap.cycleDay !== -1) {
+      startLineIdx = 1;
+    } else {
+      colMap = { date: 0, dayName: 1, cycle: 2, cycleDay: 3, tt: 4, event: 5 };
+    }
+
+    function normalizeDate(raw) {
+      if (!raw) return null;
+      var s = raw.trim();
+      var m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+      if (m) {
+        var y = m[1], mo = ('0' + m[2]).slice(-2), da = ('0' + m[3]).slice(-2);
+        return y + '-' + mo + '-' + da;
+      }
+      var m2 = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+      if (m2) {
+        var da2 = ('0' + m2[1]).slice(-2), mo2 = ('0' + m2[2]).slice(-2), y2 = m2[3];
+        return y2 + '-' + mo2 + '-' + da2;
+      }
+      return null;
+    }
+
+    var parsedCycleDays = [];
+    var parsedNonCycleEvents = {};
+    var errors = [];
+    var warnings = [];
+    var previewRows = [];
+
+    for (var lineNum = startLineIdx; lineNum < lines.length; lineNum++) {
+      var rawL = lines[lineNum];
+      var parts = splitLine(rawL);
+      if (parts.length === 0 || (parts.length === 1 && !parts[0])) continue;
+
+      var rawDate = colMap.date >= 0 && colMap.date < parts.length ? parts[colMap.date] : '';
+      var dateStr = normalizeDate(rawDate);
+      if (!dateStr) {
+        errors.push('第 ' + (lineNum + 1) + ' 行：無法識別有效日期「' + rawDate + '」');
+        continue;
+      }
+
+      var dayName = colMap.dayName >= 0 && colMap.dayName < parts.length ? parts[colMap.dayName] : '';
+      if (!dayName) {
+        try {
+          var dt = new Date(dateStr + 'T00:00:00');
+          var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          dayName = dayNames[dt.getDay()] || '';
+        } catch (e) {}
+      }
+
+      var rawCycle = colMap.cycle >= 0 && colMap.cycle < parts.length ? parts[colMap.cycle] : '';
+      var cycleNum = parseInt(String(rawCycle).replace(/\D/g, ''), 10);
+      if (isNaN(cycleNum)) cycleNum = 0;
+
+      var rawCycleDay = colMap.cycleDay >= 0 && colMap.cycleDay < parts.length ? parts[colMap.cycleDay] : '';
+      var cycleDay = String(rawCycleDay).toUpperCase().trim();
+      if (cycleDay.indexOf('DAY') !== -1) {
+        cycleDay = cycleDay.replace(/DAY\s*/, '').trim();
+      }
+      var isValidCycleDay = /^[A-F]$/.test(cycleDay);
+
+      var rawTt = colMap.tt >= 0 && colMap.tt < parts.length ? parts[colMap.tt] : '';
+      var tt = 'Normal';
+      if (/st1/i.test(rawTt)) tt = 'ST1';
+      else if (/st2/i.test(rawTt)) tt = 'ST2';
+
+      var rawEvent = colMap.event >= 0 && colMap.event < parts.length ? parts[colMap.event] : '';
+
+      if (isValidCycleDay) {
+        parsedCycleDays.push({
+          date: dateStr,
+          dayName: dayName,
+          cycle: cycleNum || (parsedCycleDays.length > 0 ? parsedCycleDays[parsedCycleDays.length - 1].cycle : 1),
+          cycleDay: cycleDay,
+          tt: tt,
+          event: rawEvent || ''
+        });
+      } else {
+        if (rawEvent) {
+          parsedNonCycleEvents[dateStr] = rawEvent;
+        }
+      }
+
+      if (previewRows.length < 15) {
+        previewRows.push({
+          date: dateStr,
+          dayName: dayName,
+          cycle: cycleNum || '—',
+          cycleDay: isValidCycleDay ? cycleDay : '— (非循環日/假期)',
+          tt: tt,
+          event: rawEvent || '—'
+        });
+      }
+    }
+
+    parsedCycleDays.sort(function (a, b) { return a.date.localeCompare(b.date); });
+
+    return {
+      cycleDays: parsedCycleDays,
+      nonCycleEvents: parsedNonCycleEvents,
+      totalLines: lines.length - startLineIdx,
+      cycleDaysCount: parsedCycleDays.length,
+      eventsCount: Object.keys(parsedNonCycleEvents).length,
+      previewRows: previewRows,
+      errors: errors,
+      warnings: warnings
+    };
+  }
+
+  function exportCalendarCsv() {
+    var rows = ['Date,DayName,Cycle,CycleDay,TimetableType,Event'];
+    var allDates = {};
+    activeCycleDays.forEach(function (d) {
+      allDates[d.date] = {
+        date: d.date,
+        dayName: d.dayName || '',
+        cycle: d.cycle || '',
+        cycleDay: d.cycleDay || '',
+        tt: d.tt || 'Normal',
+        event: d.event || ''
+      };
+    });
+    Object.keys(activeNonCycleEvents).forEach(function (d) {
+      if (!allDates[d]) {
+        var dayName = '';
+        try {
+          var dt = new Date(d + 'T00:00:00');
+          var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          dayName = dayNames[dt.getDay()] || '';
+        } catch (e) {}
+        allDates[d] = {
+          date: d,
+          dayName: dayName,
+          cycle: '',
+          cycleDay: '',
+          tt: '',
+          event: activeNonCycleEvents[d] || ''
+        };
+      } else if (!allDates[d].event && activeNonCycleEvents[d]) {
+        allDates[d].event = activeNonCycleEvents[d];
+      }
+    });
+
+    var sortedDates = Object.keys(allDates).sort();
+    sortedDates.forEach(function (d) {
+      var item = allDates[d];
+      var ev = item.event || '';
+      var line = [
+        item.date,
+        item.dayName,
+        item.cycle,
+        item.cycleDay,
+        item.tt,
+        ev.indexOf(',') !== -1 ? '"' + ev.replace(/"/g, '""') + '"' : ev
+      ].join(',');
+      rows.push(line);
+    });
+
+    return rows.join('\r\n');
+  }
+
   /* ----------------------------------------------------------- APIs */
 
   function getCycleDayInfo(dateStr) {
     if (!dateStr) return null;
     var cleanDate = dateStr.trim();
-    if (CYCLE_DATE_MAP[cleanDate]) {
-      var d = CYCLE_DATE_MAP[cleanDate];
+    if (activeCycleDateMap[cleanDate]) {
+      var d = activeCycleDateMap[cleanDate];
       return {
         date: d.date,
         dayName: d.dayName,
@@ -1518,7 +1916,7 @@
     }
     return {
       date: cleanDate,
-      event: NON_CYCLE_EVENTS[cleanDate] || '',
+      event: activeNonCycleEvents[cleanDate] || '',
       isSchoolCycleDay: false
     };
   }
@@ -1578,7 +1976,7 @@
   function getScheduledLessonsForDate(dateStr) {
     var info = getCycleDayInfo(dateStr);
     if (!info || !info.isSchoolCycleDay || !info.cycleDay) return [];
-    var lessons = SCHEDULE[info.cycleDay] || [];
+    var lessons = activeSchedule[info.cycleDay] || [];
     var tt = info.tt || 'Normal';
     return lessons.map(function (l) {
       var timing = getPeriodTiming(l.period, tt);
@@ -1603,10 +2001,10 @@
 
   function findPreviousScheduledLessonDate(clsName, beforeDate) {
     if (!beforeDate || !clsName) return null;
-    for (var i = CYCLE_DAYS.length - 1; i >= 0; i--) {
-      var d = CYCLE_DAYS[i];
+    for (var i = activeCycleDays.length - 1; i >= 0; i--) {
+      var d = activeCycleDays[i];
       if (d.date < beforeDate) {
-        var dayLessons = SCHEDULE[d.cycleDay] || [];
+        var dayLessons = activeSchedule[d.cycleDay] || [];
         var matched = dayLessons.filter(function (l) {
           return matchClass(clsName, l.class);
         });
@@ -1641,10 +2039,10 @@
 
   function findNextScheduledLessonDate(clsName, afterDate) {
     if (!afterDate || !clsName) return null;
-    for (var i = 0; i < CYCLE_DAYS.length; i++) {
-      var d = CYCLE_DAYS[i];
+    for (var i = 0; i < activeCycleDays.length; i++) {
+      var d = activeCycleDays[i];
       if (d.date > afterDate) {
-        var dayLessons = SCHEDULE[d.cycleDay] || [];
+        var dayLessons = activeSchedule[d.cycleDay] || [];
         var matched = dayLessons.filter(function (l) {
           return matchClass(clsName, l.class);
         });
@@ -1679,7 +2077,7 @@
 
   function getClassProfile(clsName) {
     var norm = normalizeClass(clsName);
-    return CLASS_PROFILE[norm] || null;
+    return activeClassProfile[norm] || null;
   }
 
   function getSuggestedClass(dateStr, timeStr) {
@@ -1726,12 +2124,19 @@
     };
   }
 
+  // Load custom data from localStorage on initialization
+  loadPersistedData();
+
   return {
-    CYCLE_DAYS: CYCLE_DAYS,
-    NON_CYCLE_EVENTS: NON_CYCLE_EVENTS,
+    DEFAULT_CYCLE_DAYS: DEFAULT_CYCLE_DAYS,
+    DEFAULT_NON_CYCLE_EVENTS: DEFAULT_NON_CYCLE_EVENTS,
+    DEFAULT_SCHEDULE: DEFAULT_SCHEDULE,
+    DEFAULT_CLASS_PROFILE: DEFAULT_CLASS_PROFILE,
+    CYCLE_DAYS: activeCycleDays,
+    NON_CYCLE_EVENTS: activeNonCycleEvents,
     TIMINGS: TIMINGS,
-    SCHEDULE: SCHEDULE,
-    CLASS_PROFILE: CLASS_PROFILE,
+    SCHEDULE: activeSchedule,
+    CLASS_PROFILE: activeClassProfile,
     normalizeClass: normalizeClass,
     matchClass: matchClass,
     getCycleDayInfo: getCycleDayInfo,
@@ -1742,6 +2147,20 @@
     findPreviousScheduledLessonDate: findPreviousScheduledLessonDate,
     findNextScheduledLessonDate: findNextScheduledLessonDate,
     getClassProfile: getClassProfile,
-    getSuggestedClass: getSuggestedClass
+    getSuggestedClass: getSuggestedClass,
+    // Dynamic management APIs
+    getSchedule: function () { return JSON.parse(JSON.stringify(activeSchedule)); },
+    setSchedule: setSchedule,
+    resetSchedule: resetSchedule,
+    isCustomSchedule: isCustomSchedule,
+    getCalendarDays: function () { return JSON.parse(JSON.stringify(activeCycleDays)); },
+    getNonCycleEvents: function () { return JSON.parse(JSON.stringify(activeNonCycleEvents)); },
+    setCalendar: setCalendar,
+    resetCalendar: resetCalendar,
+    isCustomCalendar: isCustomCalendar,
+    parseCalendarCsv: parseCalendarCsv,
+    exportCalendarCsv: exportCalendarCsv,
+    rebuildDateIndex: rebuildDateIndex,
+    rebuildClassProfile: rebuildClassProfile
   };
 });

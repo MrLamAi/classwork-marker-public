@@ -3,6 +3,9 @@
 (function () {
 'use strict';
 
+var APP_VERSION = '2.5.0';
+var APP_COMMIT  = '6854ad0';
+
 /* =============================================================== state */
 
 var S         = null;        // bundle from /api/bundle
@@ -24,7 +27,7 @@ var rosterDraft = null;
 var askHandler  = null;
 var rosterEditCls = null;  // class being edited in roster/import tabs
 
-var appModule   = 'classwork';  // 'classwork' | 'discipline'
+var appModule   = 'discipline'; // 'classwork' | 'discipline' (default: discipline)
 var activeStamp = 'none';       // 'none' | 'no_hw' | 'no_book' | 'sleeping' | 'talking' | 'good_perf' | 'warning'
 var currentShStudent = null;    // student number currently open in studentHistoryModal
 var currentShFilter  = 'all';   // 'all' | 'no_hw' | 'no_book' | 'sleeping' | 'talking' | 'good_perf' | 'warning'
@@ -312,6 +315,7 @@ function syncUrl() {
 }
 
 function wire() {
+  renderSettingsVersion();
   if ($('clsSel')) $('clsSel').addEventListener('change', function () { load(this.value, '', S ? S.date : '').catch(fail); });
   if ($('dateSel')) $('dateSel').addEventListener('change', function () { load(S.cls, '', this.value).catch(fail); });
 
@@ -2809,13 +2813,20 @@ function openSettingsModal(tab) {
   renderRoster();
 
   // Tab 4: Discipline preferences
+  // Tab 4: Schedule & Calendar
+  initScheduleTab();
+
+  // Tab 5: Discipline preferences
   initDisciplinePrefsTab();
 
-  // Tab 5: Tile design
+  // Tab 6: Tile design
   initTileDesignTab();
 
-  // Tab 6: API
+  // Tab 7: API
   initApiTab();
+
+  // Render bottom-left version info
+  renderSettingsVersion();
 
   openModal('settingsModal');
 }
@@ -2831,6 +2842,8 @@ function showSettingsTab(tab) {
     if ($('rosterSave')) $('rosterSave').hidden = false;
     if ($('rosterWipe')) $('rosterWipe').hidden = false;
     renderRoster();
+  } else if (tab === 'schedule') {
+    renderScheduleSettingsTab();
   }
 }
 
@@ -3733,10 +3746,12 @@ function renderFloatingStampBar() {
 
   if (!disciplinePrefs.enableFloatingBar || appModule !== 'discipline') {
     bar.hidden = true;
+    bar.style.display = 'none';
     return;
   }
 
   bar.hidden = false;
+  bar.style.display = 'flex';
 
   if (disciplinePrefs.floatingCollapsed) {
     bar.classList.add('is-collapsed');
@@ -3883,6 +3898,627 @@ function sendApiTestSignal() {
     resultBox.className = 'api-test-result error';
     resultBox.textContent = '✕ 發送失敗：' + (err.message || err);
   });
+}
+
+/* =============================================================== Schedule & Calendar Tab */
+
+var schedSelectedClass = null;
+var schedEditingSlotKey = null; // null or { day: 'A', idx: 0 }
+var schedCurrentSubtab = 'timetable'; // 'timetable' | 'calendar'
+var schedParsedCalendar = null;
+var schedMatrixViewActive = false;
+var schedTabInitialized = false;
+
+function renderSettingsVersion() {
+  var tag = $('settingsVersionTag');
+  if (tag) {
+    tag.innerHTML = 'ver. ' + esc(APP_VERSION) + ' · <span id="settingsCommitHash">' + esc(APP_COMMIT) + '</span>';
+  }
+}
+
+function initScheduleTab() {
+  if (!schedSelectedClass && S) {
+    schedSelectedClass = S.cls;
+  }
+
+  if (!schedTabInitialized) {
+    schedTabInitialized = true;
+
+    // Sub-tab switching
+    Array.prototype.forEach.call(document.querySelectorAll('[data-schedsub]'), function (btn) {
+      btn.addEventListener('click', function () {
+        schedCurrentSubtab = btn.dataset.schedsub;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-schedsub]'), function (b) {
+          b.classList.toggle('is-active', b.dataset.schedsub === schedCurrentSubtab);
+        });
+        var ttPane = $('schedTimetablePane');
+        var calPane = $('schedCalendarPane');
+        if (ttPane) ttPane.hidden = (schedCurrentSubtab !== 'timetable');
+        if (calPane) calPane.hidden = (schedCurrentSubtab !== 'calendar');
+        if (schedCurrentSubtab === 'timetable') renderSchedTimetable();
+        else renderSchedCalendarStats();
+      });
+    });
+
+    // Timetable class selector
+    var clsSel = $('schedClassSel');
+    if (clsSel) {
+      clsSel.addEventListener('change', function () {
+        schedSelectedClass = clsSel.value;
+        schedEditingSlotKey = null;
+        renderSchedClassTable();
+        renderSchedClassSummary();
+        resetSchedForm();
+      });
+    }
+
+    // Toggle Matrix view
+    var toggleMatrixBtn = $('schedToggleMatrixBtn');
+    if (toggleMatrixBtn) {
+      toggleMatrixBtn.addEventListener('click', function () {
+        schedMatrixViewActive = !schedMatrixViewActive;
+        var singleWrap = $('schedClassSingleWrap');
+        var matrixWrap = $('schedMatrixWrap');
+        if (singleWrap) singleWrap.hidden = schedMatrixViewActive;
+        if (matrixWrap) matrixWrap.hidden = !schedMatrixViewActive;
+        toggleMatrixBtn.textContent = schedMatrixViewActive ? '📋 切換班別清單視圖' : '📊 切換 6-Day 全課表矩陣';
+        if (schedMatrixViewActive) renderSchedMatrix();
+      });
+    }
+
+    // Reset Timetable button
+    var resetTimetableBtn = $('schedResetTimetableBtn');
+    if (resetTimetableBtn) {
+      resetTimetableBtn.addEventListener('click', function () {
+        ask({
+          title: '還原預設課堂排程？',
+          msg: '確定要將所有班別的 6-Day 課堂排程還原為學校官方預設值嗎？所有自訂更動將被清除。',
+          ok: '確認還原',
+          onOk: function () {
+            if (window.ScheduleEngine && ScheduleEngine.resetSchedule) {
+              ScheduleEngine.resetSchedule();
+            }
+            schedEditingSlotKey = null;
+            renderSchedTimetable();
+            checkScheduleForToday();
+            toast('已還原為官方預設課堂排程', 'ok');
+          }
+        });
+      });
+    }
+
+    // Slot form cancel
+    var cancelBtn = $('schedFormCancelBtn');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function () {
+        resetSchedForm();
+      });
+    }
+
+    // Slot form submit
+    var submitBtn = $('schedFormSubmitBtn');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', function () {
+        handleSchedFormSubmit();
+      });
+    }
+
+    // Single class table clicks (edit / delete)
+    var tbody = $('schedClassTbody');
+    if (tbody) {
+      tbody.addEventListener('click', function (e) {
+        var editBtn = e.target.closest('.sched-edit-slot-btn');
+        var delBtn = e.target.closest('.sched-del-slot-btn');
+        if (editBtn) {
+          var day = editBtn.dataset.day;
+          var idx = parseInt(editBtn.dataset.idx, 10);
+          startEditSlot(day, idx);
+        } else if (delBtn) {
+          var dayDel = delBtn.dataset.day;
+          var idxDel = parseInt(delBtn.dataset.idx, 10);
+          deleteSlot(dayDel, idxDel);
+        }
+      });
+    }
+
+    // Matrix cell click
+    var matrixTbody = $('schedMatrixTbody');
+    if (matrixTbody) {
+      matrixTbody.addEventListener('click', function (e) {
+        var cellClass = e.target.closest('.sched-matrix-cell-class');
+        if (cellClass && cellClass.dataset.cls) {
+          schedSelectedClass = cellClass.dataset.cls;
+          schedMatrixViewActive = false;
+          var singleWrap = $('schedClassSingleWrap');
+          var matrixWrap = $('schedMatrixWrap');
+          if (singleWrap) singleWrap.hidden = false;
+          if (matrixWrap) matrixWrap.hidden = true;
+          if ($('schedToggleMatrixBtn')) $('schedToggleMatrixBtn').textContent = '📊 切換 6-Day 全課表矩陣';
+          renderSchedTimetable();
+        }
+      });
+    }
+
+    // Calendar file input
+    var calFileInput = $('calFileInput');
+    if (calFileInput) {
+      calFileInput.addEventListener('change', function (e) {
+        var file = e.target.files && e.target.files[0];
+        if (!file) return;
+        var nameSpan = $('calSelectedFileName');
+        if (nameSpan) nameSpan.textContent = file.name;
+        var reader = new FileReader();
+        reader.onload = function (evt) {
+          var text = evt.target.result;
+          var pasteArea = $('calPasteArea');
+          if (pasteArea) pasteArea.value = text;
+          doCalendarPreview(text);
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    // Calendar preview button
+    var calPreviewBtn = $('calPreviewBtn');
+    if (calPreviewBtn) {
+      calPreviewBtn.addEventListener('click', function () {
+        var pasteArea = $('calPasteArea');
+        var text = (pasteArea ? pasteArea.value : '').trim();
+        if (!text) {
+          toast('請先選擇 CSV 檔案或貼上校曆文字', 'bad');
+          return;
+        }
+        doCalendarPreview(text);
+      });
+    }
+
+    // Calendar apply button
+    var calApplyBtn = $('calApplyBtn');
+    if (calApplyBtn) {
+      calApplyBtn.addEventListener('click', function () {
+        var pasteArea = $('calPasteArea');
+        var text = (pasteArea ? pasteArea.value : '').trim();
+        if (!text) {
+          toast('請先輸入或貼上校曆資料', 'bad');
+          return;
+        }
+        if (!window.ScheduleEngine || !ScheduleEngine.parseCalendarCsv) {
+          toast('系統排程引擎尚未就緒', 'bad');
+          return;
+        }
+        var parsed = ScheduleEngine.parseCalendarCsv(text);
+        if (parsed.error || parsed.cycleDaysCount === 0) {
+          toast(parsed.error || '校曆中未發現任何有效循環日 (A-F)', 'bad');
+          return;
+        }
+
+        ask({
+          title: '確認匯入並套用新校曆？',
+          msg: '即將套用包含 ' + parsed.cycleDaysCount + ' 個循環日及 ' + parsed.eventsCount + ' 項假期的新校曆。確定要儲存嗎？',
+          ok: '確認套用',
+          onOk: function () {
+            try {
+              ScheduleEngine.setCalendar(parsed.cycleDays, parsed.nonCycleEvents);
+              schedParsedCalendar = parsed;
+              renderSchedCalendarStats();
+              checkScheduleForToday();
+              toast('已成功儲存並套用新校曆！', 'ok');
+            } catch (err) {
+              toast('套用失敗：' + err.message, 'bad');
+            }
+          }
+        });
+      });
+    }
+
+    // Calendar export button
+    var calExportBtn = $('calExportBtn');
+    if (calExportBtn) {
+      calExportBtn.addEventListener('click', function () {
+        if (!window.ScheduleEngine || !ScheduleEngine.exportCalendarCsv) return;
+        var csv = ScheduleEngine.exportCalendarCsv();
+        var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'school_calendar_2026_2027.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast('已匯出目前校曆 CSV 檔案', 'ok');
+      });
+    }
+
+    // Calendar reset button
+    var calResetBtn = $('calResetBtn');
+    if (calResetBtn) {
+      calResetBtn.addEventListener('click', function () {
+        ask({
+          title: '還原官方預設校曆？',
+          msg: '確定要清除自訂校曆並還原為官方預設 2026-2027 校曆（150天）嗎？',
+          ok: '確認還原',
+          onOk: function () {
+            if (window.ScheduleEngine && ScheduleEngine.resetCalendar) {
+              ScheduleEngine.resetCalendar();
+            }
+            schedParsedCalendar = null;
+            var pasteArea = $('calPasteArea');
+            if (pasteArea) pasteArea.value = '';
+            var fileSpan = $('calSelectedFileName');
+            if (fileSpan) fileSpan.textContent = '未選擇檔案';
+            var pWrap = $('calPreviewWrap');
+            if (pWrap) pWrap.hidden = true;
+            var pMsg = $('calParseMsg');
+            if (pMsg) pMsg.textContent = '';
+            renderSchedCalendarStats();
+            checkScheduleForToday();
+            toast('已還原為官方預設校曆', 'ok');
+          }
+        });
+      });
+    }
+  }
+
+  renderScheduleSettingsTab();
+}
+
+function renderScheduleSettingsTab() {
+  var ttPane = $('schedTimetablePane');
+  var calPane = $('schedCalendarPane');
+  if (ttPane) ttPane.hidden = (schedCurrentSubtab !== 'timetable');
+  if (calPane) calPane.hidden = (schedCurrentSubtab !== 'calendar');
+
+  if (schedCurrentSubtab === 'timetable') {
+    renderSchedTimetable();
+  } else {
+    renderSchedCalendarStats();
+  }
+}
+
+function renderSchedTimetable() {
+  if (!S) return;
+  if (!schedSelectedClass) {
+    schedSelectedClass = S.cls || '4C';
+  }
+
+  // Populate class dropdown
+  var clsSel = $('schedClassSel');
+  if (clsSel) {
+    var availableClasses = (S.classes && S.classes.length > 0) ? S.classes.slice() : ['1A', '1D', '2A', '2B', '2C', '2D', '4C'];
+    if (availableClasses.indexOf(schedSelectedClass) === -1) {
+      availableClasses.unshift(schedSelectedClass);
+    }
+    clsSel.innerHTML = availableClasses.map(function (c) {
+      return '<option value="' + esc(c) + '"' + (c === schedSelectedClass ? ' selected' : '') + '>' + esc(c) + ' 班' + (c === S.cls ? ' (目前)' : '') + '</option>';
+    }).join('');
+  }
+
+  renderSchedClassTable();
+  renderSchedClassSummary();
+  if (schedMatrixViewActive) {
+    renderSchedMatrix();
+  }
+}
+
+function renderSchedClassTable() {
+  var tbody = $('schedClassTbody');
+  if (!tbody || !window.ScheduleEngine) return;
+
+  var sched = ScheduleEngine.getSchedule();
+  var days = ['A', 'B', 'C', 'D', 'E', 'F'];
+  var rowsHtml = '';
+  var count = 0;
+
+  days.forEach(function (d) {
+    var daySlots = sched[d] || [];
+    daySlots.forEach(function (slot, idx) {
+      if (ScheduleEngine.matchClass(schedSelectedClass, slot.class)) {
+        count++;
+        var timing = ScheduleEngine.getPeriodTiming(slot.period, 'Normal');
+        var timeStr = timing ? (timing.start + ' - ' + timing.end) : '—';
+        rowsHtml += '<tr>' +
+          '<td><span class="sched-day-badge">Day ' + esc(d) + '</span></td>' +
+          '<td><b>第 ' + esc(slot.period) + ' 堂</b></td>' +
+          '<td class="muted" style="font-family:monospace;font-size:12px">' + esc(timeStr) + '</td>' +
+          '<td>' + esc(slot.room || '—') + ' 室</td>' +
+          '<td>' + esc(slot.subject || '—') + '</td>' +
+          '<td style="text-align:center">' +
+            '<div style="display:inline-flex;gap:4px">' +
+              '<button type="button" class="tool small-tool sched-edit-slot-btn" data-day="' + esc(d) + '" data-idx="' + idx + '">✏️ 編輯</button>' +
+              '<button type="button" class="tool small-tool quiet-danger sched-del-slot-btn" data-day="' + esc(d) + '" data-idx="' + idx + '">🗑️ 刪除</button>' +
+            '</div>' +
+          '</td>' +
+        '</tr>';
+      }
+    });
+  });
+
+  if (count === 0) {
+    rowsHtml = '<tr><td colspan="6" class="muted" style="text-align:center;padding:18px">' +
+      '班別 ' + esc(schedSelectedClass) + ' 目前尚未設定任何循環課堂排程。請於下方表單新增課堂時段。</td></tr>';
+  }
+
+  tbody.innerHTML = rowsHtml;
+}
+
+function renderSchedClassSummary() {
+  var sumEl = $('schedClassSummary');
+  if (!sumEl || !window.ScheduleEngine) return;
+
+  var prof = ScheduleEngine.getClassProfile(schedSelectedClass);
+  var sched = ScheduleEngine.getSchedule();
+  var days = ['A', 'B', 'C', 'D', 'E', 'F'];
+  var totalSlots = 0;
+  var daySlots = [];
+
+  days.forEach(function (d) {
+    var matches = (sched[d] || []).filter(function (s) { return ScheduleEngine.matchClass(schedSelectedClass, s.class); });
+    if (matches.length > 0) {
+      totalSlots += matches.length;
+      var pStr = matches.map(function (m) { return m.period; }).sort(function (a, b) { return a - b; }).join(', ');
+      daySlots.push('Day ' + d + ' (第 ' + pStr + ' 堂)');
+    }
+  });
+
+  if (totalSlots === 0) {
+    sumEl.textContent = '此班每循環：尚未排課';
+  } else {
+    sumEl.textContent = '每循環共 ' + totalSlots + ' 節：' + daySlots.join('； ');
+  }
+}
+
+function resetSchedForm() {
+  schedEditingSlotKey = null;
+  var title = $('schedFormTitle');
+  if (title) title.textContent = '➕ 新增課堂時段';
+  var submitBtn = $('schedFormSubmitBtn');
+  if (submitBtn) submitBtn.textContent = '➕ 加入排程';
+  var cancelBtn = $('schedFormCancelBtn');
+  if (cancelBtn) cancelBtn.hidden = true;
+  var doubleChk = $('schedFormDoublePeriod');
+  if (doubleChk) {
+    doubleChk.checked = false;
+    doubleChk.disabled = false;
+  }
+
+  if (window.ScheduleEngine) {
+    var prof = ScheduleEngine.getClassProfile(schedSelectedClass);
+    if (prof) {
+      if ($('schedFormRoom')) $('schedFormRoom').value = (prof.defaultRoom || '').split('/')[0].trim();
+      if ($('schedFormSubject')) $('schedFormSubject').value = prof.subject || '';
+    }
+  }
+}
+
+function startEditSlot(day, idx) {
+  if (!window.ScheduleEngine) return;
+  var sched = ScheduleEngine.getSchedule();
+  var slot = (sched[day] || [])[idx];
+  if (!slot) return;
+
+  schedEditingSlotKey = { day: day, idx: idx };
+
+  var title = $('schedFormTitle');
+  if (title) title.textContent = '✏️ 編輯課堂時段 (Day ' + day + ' 第 ' + slot.period + ' 堂)';
+  var submitBtn = $('schedFormSubmitBtn');
+  if (submitBtn) submitBtn.textContent = '💾 儲存修改';
+  var cancelBtn = $('schedFormCancelBtn');
+  if (cancelBtn) cancelBtn.hidden = false;
+
+  if ($('schedFormDay')) $('schedFormDay').value = day;
+  if ($('schedFormPeriod')) $('schedFormPeriod').value = String(slot.period);
+  if ($('schedFormRoom')) $('schedFormRoom').value = slot.room || '';
+  if ($('schedFormSubject')) $('schedFormSubject').value = slot.subject || '';
+  var doubleChk = $('schedFormDoublePeriod');
+  if (doubleChk) {
+    doubleChk.checked = false;
+    doubleChk.disabled = true;
+  }
+
+  var card = $('schedFormCard');
+  if (card && card.scrollIntoView) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function deleteSlot(day, idx) {
+  if (!window.ScheduleEngine) return;
+  var sched = ScheduleEngine.getSchedule();
+  var slot = (sched[day] || [])[idx];
+  if (!slot) return;
+
+  ask({
+    title: '確認刪除課堂？',
+    msg: '確定要刪除 ' + slot.class + ' 於 Day ' + day + ' 第 ' + slot.period + ' 堂的排程嗎？',
+    ok: '確定刪除',
+    onOk: function () {
+      sched[day].splice(idx, 1);
+      ScheduleEngine.setSchedule(sched);
+      renderSchedTimetable();
+      checkScheduleForToday();
+      toast('已刪除課堂時段', 'ok');
+    }
+  });
+}
+
+function handleSchedFormSubmit() {
+  if (!window.ScheduleEngine) return;
+  var day = $('schedFormDay').value;
+  var period = parseInt($('schedFormPeriod').value, 10);
+  var isDouble = $('schedFormDoublePeriod') ? $('schedFormDoublePeriod').checked : false;
+  var room = ($('schedFormRoom').value || '').trim();
+  var subject = ($('schedFormSubject').value || '').trim();
+
+  if (isNaN(period) || period < 1 || period > 8) {
+    toast('請選擇有效節數 (1-8)', 'bad');
+    return;
+  }
+
+  var sched = ScheduleEngine.getSchedule();
+  if (!sched[day]) sched[day] = [];
+
+  if (schedEditingSlotKey) {
+    // Edit existing slot
+    var oldDay = schedEditingSlotKey.day;
+    var oldIdx = schedEditingSlotKey.idx;
+
+    if (oldDay === day) {
+      sched[day][oldIdx] = {
+        period: period,
+        class: schedSelectedClass,
+        rawClass: schedSelectedClass,
+        subject: subject,
+        room: room
+      };
+    } else {
+      sched[oldDay].splice(oldIdx, 1);
+      sched[day].push({
+        period: period,
+        class: schedSelectedClass,
+        rawClass: schedSelectedClass,
+        subject: subject,
+        room: room
+      });
+    }
+  } else {
+    // Add new slot(s)
+    sched[day].push({
+      period: period,
+      class: schedSelectedClass,
+      rawClass: schedSelectedClass,
+      subject: subject,
+      room: room
+    });
+
+    if (isDouble && period < 8) {
+      sched[day].push({
+        period: period + 1,
+        class: schedSelectedClass,
+        rawClass: schedSelectedClass,
+        subject: subject,
+        room: room
+      });
+    }
+  }
+
+  // Sort by period ascending
+  sched[day].sort(function (a, b) { return a.period - b.period; });
+
+  ScheduleEngine.setSchedule(sched);
+  resetSchedForm();
+  renderSchedTimetable();
+  checkScheduleForToday();
+  toast('已成功儲存課堂排程！', 'ok');
+}
+
+function renderSchedMatrix() {
+  var tbody = $('schedMatrixTbody');
+  if (!tbody || !window.ScheduleEngine) return;
+
+  var sched = ScheduleEngine.getSchedule();
+  var days = ['A', 'B', 'C', 'D', 'E', 'F'];
+  var html = '';
+
+  for (var p = 1; p <= 8; p++) {
+    var timing = ScheduleEngine.getPeriodTiming(p, 'Normal');
+    var timeStr = timing ? (timing.start + ' - ' + timing.end) : '';
+    html += '<tr>';
+    html += '<td style="font-weight:700;background:var(--surface-2)">第 ' + p + ' 堂<br><span class="muted" style="font-size:11px;font-family:monospace">' + esc(timeStr) + '</span></td>';
+
+    for (var dIdx = 0; dIdx < days.length; dIdx++) {
+      var d = days[dIdx];
+      var matches = (sched[d] || []).filter(function (s) { return s.period === p; });
+      html += '<td>';
+      if (matches.length === 0) {
+        html += '<span class="muted" style="font-size:11px">—</span>';
+      } else {
+        matches.forEach(function (m) {
+          var isCur = ScheduleEngine.matchClass(schedSelectedClass, m.class);
+          var st = isCur ? 'background:var(--brand);color:#fff;border-color:var(--brand)' : '';
+          html += '<span class="sched-matrix-cell-class" data-cls="' + esc(m.class) + '" style="cursor:pointer;' + st + '" title="點擊切換維護 ' + esc(m.class) + '">' +
+            esc(m.class) + (m.room ? ' (' + esc(m.room) + ')' : '') +
+          '</span>';
+        });
+      }
+      html += '</td>';
+    }
+    html += '</tr>';
+  }
+
+  tbody.innerHTML = html;
+}
+
+function renderSchedCalendarStats() {
+  if (!window.ScheduleEngine) return;
+
+  var cDays = ScheduleEngine.getCalendarDays();
+  var events = ScheduleEngine.getNonCycleEvents();
+  var isCustom = ScheduleEngine.isCustomCalendar();
+
+  if ($('calStatTotalDays')) $('calStatTotalDays').textContent = String(cDays.length);
+
+  // Calc cycles
+  var maxCycle = 0;
+  cDays.forEach(function (d) { if (d.cycle && d.cycle > maxCycle) maxCycle = d.cycle; });
+  if ($('calStatCycles')) $('calStatCycles').textContent = String(maxCycle || 25);
+
+  if ($('calStatRange')) {
+    if (cDays.length > 0) {
+      $('calStatRange').textContent = cDays[0].date + ' ~ ' + cDays[cDays.length - 1].date;
+    } else {
+      $('calStatRange').textContent = '—';
+    }
+  }
+
+  if ($('calStatEvents')) $('calStatEvents').textContent = String(Object.keys(events).length);
+
+  var tag = $('calSourceTag');
+  if (tag) {
+    tag.textContent = isCustom ? '自訂已上載校曆' : '系統預設官方校曆 (2026-2027)';
+    tag.style.background = isCustom ? 'var(--brand)' : 'var(--surface-2)';
+    tag.style.color = isCustom ? '#fff' : 'var(--text)';
+  }
+}
+
+function doCalendarPreview(text) {
+  if (!window.ScheduleEngine || !ScheduleEngine.parseCalendarCsv) return;
+  var res = ScheduleEngine.parseCalendarCsv(text);
+  var msgEl = $('calParseMsg');
+  var wrap = $('calPreviewWrap');
+  var tbody = $('calPreviewTbody');
+
+  if (res.error) {
+    if (msgEl) {
+      msgEl.className = 'small text-danger';
+      msgEl.textContent = '✕ ' + res.error;
+    }
+    if (wrap) wrap.hidden = true;
+    return;
+  }
+
+  schedParsedCalendar = res;
+
+  if (msgEl) {
+    msgEl.className = 'small text-success';
+    msgEl.textContent = '✓ 辨識到 ' + res.cycleDaysCount + ' 個循環日，' + res.eventsCount + ' 項假期/活動。' + (res.errors.length > 0 ? ' (' + res.errors.length + ' 行格式異常)' : '');
+  }
+
+  if (wrap && tbody) {
+    wrap.hidden = false;
+    var rowsHtml = '';
+    (res.previewRows || []).forEach(function (r) {
+      rowsHtml += '<tr>' +
+        '<td style="font-family:monospace">' + esc(r.date) + '</td>' +
+        '<td>' + esc(r.dayName) + '</td>' +
+        '<td class="num">' + esc(r.cycle) + '</td>' +
+        '<td><b>' + esc(r.cycleDay) + '</b></td>' +
+        '<td>' + esc(r.tt) + '</td>' +
+        '<td>' + esc(r.event) + '</td>' +
+      '</tr>';
+    });
+    tbody.innerHTML = rowsHtml;
+  }
 }
 
 /* =============================================================== dialogs */

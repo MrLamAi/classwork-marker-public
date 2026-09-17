@@ -80,8 +80,14 @@ function exec(text, params = []) {
   if (q.startsWith('create table') || q.startsWith('alter table') || q.startsWith('create index')) return [];
 
   if (q.includes('count(*)') && q.includes('from classes')) return [{ n: db.classes.length }];
-  if (q.includes('count(*)') && q.includes('from students')) return [{ n: db.students.length }];
-  if (q.includes('count(*)') && q.includes('from discipline_records')) return [{ n: db.discipline.length }];
+  if (q.includes('count(*)') && q.includes('from students')) {
+    if (q.includes('where class = $1')) return [{ n: db.students.filter((s) => s.class === p[0]).length }];
+    return [{ n: db.students.length }];
+  }
+  if (q.includes('count(*)') && q.includes('from discipline_records')) {
+    if (q.includes('where class = $1')) return [{ n: (db.discipline || []).filter((d) => d.class === p[0]).length }];
+    return [{ n: (db.discipline || []).length }];
+  }
 
   if (q.startsWith('insert into classes')) {
     const existing = db.classes.find((c) => c.name === p[0]);
@@ -107,6 +113,15 @@ function exec(text, params = []) {
   }
 
   if (q.startsWith('update classes set seats')) {
+    if (q.includes('where name = $4')) {
+      const c = db.classes.find((x) => x.name === p[3]);
+      if (c) {
+        c.seats = p[0];
+        c.total = p[1];
+        c.cols = p[2];
+      }
+      return [];
+    }
     if (q.includes('where name = $2')) {
       const c = db.classes.find((x) => x.name === p[1]);
       if (c) {
@@ -138,13 +153,15 @@ function exec(text, params = []) {
 
   if (q.startsWith('insert into students')) {
     const cls = p[0];
-    if (q.includes('on conflict (class, no) do update')) {
+    if (q.includes('on conflict (class, no)')) {
       const existing = db.students.find((s) => s.class === cls && s.no === p[1]);
       if (existing) {
-        existing.name = p[2];
-        existing.name_zh = p[3];
-        existing.name_en = p[4];
-        existing.sex = p[5];
+        if (q.includes('do update')) {
+          existing.name = p[2];
+          existing.name_zh = p[3];
+          existing.name_en = p[4];
+          existing.sex = p[5];
+        }
       } else {
         db.students.push({
           class: cls, no: p[1], name: p[2], name_zh: p[3], name_en: p[4], sex: p[5]

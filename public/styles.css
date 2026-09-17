@@ -1024,7 +1024,12 @@ body.module-discipline .mode-pill-btn.is-active {
   color: #b45309;
 }
 
-/* /* Floating Quick-Stamp Toolbox (Draggable & Collapsible, Bottom-Left) */
+/* Floating Quick-Stamp Toolbox (Draggable & Collapsible, Bottom-Left) */
+.floating-stamp-toolbox[hidden],
+body:not(.module-discipline) .floating-stamp-toolbox {
+  display: none !important;
+}
+
 .floating-stamp-toolbox {
   position: fixed;
   bottom: 20px;
@@ -1832,6 +1837,126 @@ body.module-discipline .mode-pill-btn.is-active {
 .overview-view-pill.is-active {
   background: var(--brand);
   color: #fff;
+}
+
+/* Schedule and Calendar Management Pane */
+.sched-subtabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+.sched-subtab {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sched-subtab:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.sched-subtab.is-active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.sched-summary-pill {
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  border-radius: 99px;
+  color: var(--text);
+}
+.sched-form-card {
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  margin-top: 10px;
+}
+.sched-form-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.sched-day-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.sched-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  text-align: center;
+}
+.sched-matrix-table th {
+  background: var(--surface-2);
+  padding: 8px 6px;
+  border: 1px solid var(--line);
+  font-weight: 700;
+}
+.sched-matrix-table td {
+  border: 1px solid var(--line);
+  padding: 8px 4px;
+  vertical-align: middle;
+  min-height: 42px;
+  background: var(--surface);
+}
+.sched-matrix-cell-class {
+  display: inline-block;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 11.5px;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+  margin: 1px;
+}
+.cal-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+.cal-stat-card {
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cal-stat-num {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--brand);
+}
+.cal-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.settings-version-tag {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.2px;
 }
 
 

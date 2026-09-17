@@ -26,7 +26,7 @@
   <link rel="stylesheet" href="/styles.css?v=20260914_02">
 </head>
 
-<body>
+<body class="module-discipline">
   <div id="netbar"></div>
 
   <!-- ------------------------------------------------------- passcode gate -->
@@ -79,10 +79,10 @@
 
     <!-- Mode switch pill: Classwork vs Discipline -->
     <div class="mode-pill-wrap" id="modePillWrap" role="radiogroup" aria-label="操作模式">
-      <button type="button" class="mode-pill-btn is-active" id="modClassworkBtn" data-module="classwork" title="課堂作業點名與繳交登記">
+      <button type="button" class="mode-pill-btn" id="modClassworkBtn" data-module="classwork" title="課堂作業點名與繳交登記">
         <span class="gl">📝</span> 課堂作業
       </button>
-      <button type="button" class="mode-pill-btn" id="modDisciplineBtn" data-module="discipline" title="學生課堂紀律、常規與加分登記">
+      <button type="button" class="mode-pill-btn is-active" id="modDisciplineBtn" data-module="discipline" title="學生課堂紀律、常規與加分登記">
         <span class="gl">⚡</span> 學生紀律
       </button>
     </div>
@@ -272,6 +272,7 @@
         <button type="button" class="tab is-on" data-settab="overview">📋 班別概況</button>
         <button type="button" class="tab" data-settab="classes">🏫 班別管理</button>
         <button type="button" class="tab" data-settab="roster">👥 學生名單</button>
+        <button type="button" class="tab" data-settab="schedule">📅 課表與校曆</button>
         <button type="button" class="tab" data-settab="discipline">⚡ 紀律偏好</button>
         <button type="button" class="tab" data-settab="tiledesign">🎨 座位卡設計</button>
         <button type="button" class="tab" data-settab="api">🔌 軟體同步 API</button>
@@ -456,6 +457,205 @@
             <button type="button" id="rosterBackToTopBtn" class="tool small-tool">
               ⬆️ 返回名單頂部
             </button>
+          </div>
+        </section>
+
+        <!-- Tab: Class Schedule & School Calendar -->
+        <section data-setpane="schedule" hidden>
+          <!-- Sub-tab switcher -->
+          <div class="sched-subtabs">
+            <button type="button" class="sched-subtab is-active" data-schedsub="timetable">🕒 各班課堂排程 (Timetable)</button>
+            <button type="button" class="sched-subtab" data-schedsub="calendar">📆 學校校曆資料 (School Calendar)</button>
+          </div>
+
+          <!-- Section A: Timetable -->
+          <div id="schedTimetablePane">
+            <div class="overview-query-bar" style="margin-bottom:12px">
+              <label class="setup-inline-label" style="display:flex;align-items:center;gap:6px">
+                <span class="setup-label" style="margin:0">選擇班別:</span>
+                <select id="schedClassSel" class="text-input" style="width:auto;font-weight:700"></select>
+              </label>
+              <span id="schedClassSummary" class="sched-summary-pill"></span>
+              <span class="spacer"></span>
+              <button type="button" id="schedToggleMatrixBtn" class="tool small-tool">📊 切換 6-Day 全課表矩陣</button>
+              <button type="button" id="schedResetTimetableBtn" class="tool small-tool quiet-danger">🔄 還原預設排程</button>
+            </div>
+
+            <!-- Single Class Schedule Table -->
+            <div id="schedClassSingleWrap">
+              <div class="log-summary-table-wrap" style="margin-bottom:14px">
+                <table class="log-summary-table" id="schedClassTable">
+                  <thead>
+                    <tr>
+                      <th style="width:90px">循環日</th>
+                      <th style="width:140px">堂數 / 節數</th>
+                      <th style="width:130px">時間 (參考)</th>
+                      <th style="width:100px">上課室號</th>
+                      <th>科目名稱</th>
+                      <th style="width:100px;text-align:center">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="schedClassTbody"></tbody>
+                </table>
+              </div>
+
+              <!-- Add/Edit Slot Card -->
+              <div class="sched-form-card" id="schedFormCard">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                  <h4 id="schedFormTitle" style="margin:0;font-size:13px;font-weight:700">➕ 新增課堂時段</h4>
+                  <button type="button" id="schedFormCancelBtn" class="tool small-tool" hidden>取消編輯</button>
+                </div>
+                <div class="sched-form-grid">
+                  <label class="setup-inline-label">
+                    <span class="setup-label" style="margin:0">循環日:</span>
+                    <select id="schedFormDay" class="text-input" style="width:auto">
+                      <option value="A">Day A</option>
+                      <option value="B">Day B</option>
+                      <option value="C">Day C</option>
+                      <option value="D">Day D</option>
+                      <option value="E">Day E</option>
+                      <option value="F">Day F</option>
+                    </select>
+                  </label>
+
+                  <label class="setup-inline-label">
+                    <span class="setup-label" style="margin:0">節數:</span>
+                    <select id="schedFormPeriod" class="text-input" style="width:auto">
+                      <option value="1">第 1 堂 (08:20 - 09:00)</option>
+                      <option value="2">第 2 堂 (09:00 - 09:40)</option>
+                      <option value="3">第 3 堂 (09:40 - 10:20)</option>
+                      <option value="4">第 4 堂 (10:40 - 11:20)</option>
+                      <option value="5">第 5 堂 (11:20 - 12:00)</option>
+                      <option value="6">第 6 堂 (12:00 - 12:40)</option>
+                      <option value="7">第 7 堂 (14:00 - 14:40)</option>
+                      <option value="8">第 8 堂 (14:40 - 15:20)</option>
+                    </select>
+                  </label>
+
+                  <label class="pref-checkbox-label" style="margin:0;display:flex;align-items:center;gap:4px;font-size:12px">
+                    <input type="checkbox" id="schedFormDoublePeriod">
+                    <span>連續兩堂 (連堂)</span>
+                  </label>
+
+                  <label class="setup-inline-label">
+                    <span class="setup-label" style="margin:0">室號:</span>
+                    <input type="text" id="schedFormRoom" class="text-input" placeholder="例如: 502" style="width:80px">
+                  </label>
+
+                  <label class="setup-inline-label" style="flex:1;min-width:150px">
+                    <span class="setup-label" style="margin:0">科目:</span>
+                    <input type="text" id="schedFormSubject" class="text-input" placeholder="例如: 中國語文及文化" style="width:100%">
+                  </label>
+
+                  <button type="button" id="schedFormSubmitBtn" class="tool primary" style="align-self:flex-end">
+                    ➕ 加入排程
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Full 6-Day Matrix Wrap (toggleable) -->
+            <div id="schedMatrixWrap" hidden>
+              <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+                全校 6-Day 課表分佈一覽表（點擊班級可快速切換維護）：
+              </div>
+              <div class="log-summary-table-wrap">
+                <table class="sched-matrix-table" id="schedMatrixTable">
+                  <thead>
+                    <tr>
+                      <th style="width:110px">堂數 / 時間</th>
+                      <th>Day A</th>
+                      <th>Day B</th>
+                      <th>Day C</th>
+                      <th>Day D</th>
+                      <th>Day E</th>
+                      <th>Day F</th>
+                    </tr>
+                  </thead>
+                  <tbody id="schedMatrixTbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section B: School Calendar -->
+          <div id="schedCalendarPane" hidden>
+            <!-- Calendar Overview Metrics -->
+            <div class="cal-stats-grid" id="calStatsGrid">
+              <div class="cal-stat-card">
+                <div class="cal-stat-num" id="calStatTotalDays">150</div>
+                <div class="cal-stat-label">總循環日數 (Days)</div>
+              </div>
+              <div class="cal-stat-card">
+                <div class="cal-stat-num" id="calStatCycles">25</div>
+                <div class="cal-stat-label">循環週次 (Cycles)</div>
+              </div>
+              <div class="cal-stat-card">
+                <div class="cal-stat-num" id="calStatRange" style="font-size:13px;line-height:1.4">2026/09/02 ~ 2027/07/09</div>
+                <div class="cal-stat-label">學期區間 (Range)</div>
+              </div>
+              <div class="cal-stat-card">
+                <div class="cal-stat-num" id="calStatEvents">38</div>
+                <div class="cal-stat-label">假期與學校活動 (Events)</div>
+              </div>
+            </div>
+
+            <!-- Upload & Import Controls -->
+            <div class="setup-section" style="margin-top:14px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+                <div>
+                  <h3 class="setup-sec-title" style="margin:0">上載或貼上校曆資料 (CSV / Text)</h3>
+                  <p class="muted small" style="margin:2px 0 0">
+                    支援 CSV 檔案上載或直接貼上文字。匯入成功後，各班上課日推算與上一堂提醒將即時生效。
+                  </p>
+                </div>
+                <span id="calSourceTag" class="pill" style="font-size:11px;padding:3px 8px">系統預設官方校曆</span>
+              </div>
+
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+                <label class="tool" style="cursor:pointer;margin:0">
+                  <input type="file" id="calFileInput" accept=".csv,text/csv,text/plain" style="display:none">
+                  📁 選擇校曆 CSV 檔案
+                </label>
+                <span id="calSelectedFileName" class="muted small">未選擇檔案</span>
+                <span class="spacer"></span>
+                <button type="button" id="calExportBtn" class="tool small-tool">📤 匯出目前校曆 CSV</button>
+                <button type="button" id="calResetBtn" class="tool small-tool quiet-danger">🔄 還原預設官方校曆</button>
+              </div>
+
+              <textarea id="calPasteArea" class="text-input" rows="4" style="width:100%;font-family:var(--font-mono, monospace);font-size:12px" placeholder="或於此直接貼上校曆 CSV / 表格內容...
+格式範例：
+Date,DayName,Cycle,CycleDay,TimetableType,Event
+2026-09-02,Wed,1,A,ST1,
+2026-09-03,Thu,1,B,ST1,Photo-taking Day
+2026-10-01,Thu,,,Normal,National Day"></textarea>
+
+              <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <button type="button" id="calPreviewBtn" class="tool">🔍 預覽解析結果</button>
+                <button type="button" id="calApplyBtn" class="tool primary">📥 確認匯入並套用新校曆</button>
+                <span id="calParseMsg" class="small" style="font-weight:600"></span>
+              </div>
+
+              <!-- Preview Table -->
+              <div id="calPreviewWrap" style="margin-top:12px" hidden>
+                <div style="font-size:12px;font-weight:700;margin-bottom:6px">校曆解析預覽 (前 10 筆)：</div>
+                <div class="log-summary-table-wrap">
+                  <table class="log-summary-table" id="calPreviewTable">
+                    <thead>
+                      <tr>
+                        <th>日期</th>
+                        <th>星期</th>
+                        <th>週次</th>
+                        <th>循環日</th>
+                        <th>課表類型</th>
+                        <th>活動 / 假期備註</th>
+                      </tr>
+                    </thead>
+                    <tbody id="calPreviewTbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -688,8 +888,10 @@
         </section>
       </div>
 
-      <div class="modal-foot">
-        <span class="spacer"></span>
+      <div class="modal-foot" style="display:flex;align-items:center;justify-content:space-between;width:100%">
+        <div class="settings-version-tag" id="settingsVersionTag" style="font-size:11px;color:var(--muted);font-family:var(--font-mono,ui-monospace,monospace);letter-spacing:0.2px">
+          ver. 2.5.0 · <span id="settingsCommitHash">6854ad0</span>
+        </div>
         <button type="button" class="tool primary" data-close="settingsModal">完成 / 關閉</button>
       </div>
     </div>
