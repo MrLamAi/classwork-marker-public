@@ -11,6 +11,8 @@
     "dev": "node dev/server.mjs",
     "dev:vercel": "vercel dev",
     "check": "node --check public/app.js && node --check api/action.js && node --check api/external.js",
+    "check:public": "node dev/verify-public-push.mjs",
+    "push:public": "node dev/verify-public-push.mjs && git push public template:main",
     "gen:xclass": "node dev/generate_xclass_csv.mjs"
   },
   "dependencies": {
