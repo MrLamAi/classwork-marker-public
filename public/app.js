@@ -3,8 +3,8 @@
 (function () {
 'use strict';
 
-var APP_VERSION = '2.6.0';
-var APP_COMMIT  = '949bf7d';
+var APP_VERSION = '2.6.1';
+var APP_COMMIT  = '97121c0';
 
 /* =============================================================== state */
 
@@ -48,7 +48,7 @@ var STAMPS = {
 /* Discipline preferences configuration - persisted in localStorage */
 var disciplinePrefsDefaults = {
   enableFloatingBar: true,
-  floatingCollapsed: false,
+  floatingCollapsed: true,
   floatingChips: ['no_hw', 'no_book', 'sleeping', 'talking', 'device', 'washroom', 'good_perf', 'warning'],
   badgeMode: 'icons', // 'icons' | 'count' | 'off'
   badgePos: 'top-right' // 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left' | 'floating-right'
@@ -60,13 +60,27 @@ function loadDisciplinePrefs() {
     var saved = localStorage.getItem('disciplinePrefs');
     if (saved) {
       var p = JSON.parse(saved);
-      return {
+      var chips = Array.isArray(p.floatingChips) ? p.floatingChips.slice() : disciplinePrefsDefaults.floatingChips.slice();
+      // Ensure new items (device, washroom) exist even for existing user profiles
+      if (chips.indexOf('device') === -1) {
+        var idx = chips.indexOf('talking');
+        if (idx !== -1) chips.splice(idx + 1, 0, 'device');
+        else chips.push('device');
+      }
+      if (chips.indexOf('washroom') === -1) {
+        var idx2 = chips.indexOf('device');
+        if (idx2 !== -1) chips.splice(idx2 + 1, 0, 'washroom');
+        else chips.push('washroom');
+      }
+      var res = {
         enableFloatingBar: p.enableFloatingBar !== undefined ? !!p.enableFloatingBar : true,
-        floatingCollapsed: !!p.floatingCollapsed,
-        floatingChips: Array.isArray(p.floatingChips) ? p.floatingChips : disciplinePrefsDefaults.floatingChips,
+        floatingCollapsed: p.floatingCollapsed !== undefined ? !!p.floatingCollapsed : true,
+        floatingChips: chips,
         badgeMode: p.badgeMode || 'icons',
         badgePos: p.badgePos || 'top-right'
       };
+      try { localStorage.setItem('disciplinePrefs', JSON.stringify(res)); } catch (e) {}
+      return res;
     }
   } catch (e) {}
   return JSON.parse(JSON.stringify(disciplinePrefsDefaults));
@@ -4023,6 +4037,15 @@ function initFloatingToolbox() {
 
   header.addEventListener('mousedown', onPointerDown);
   header.addEventListener('touchstart', onPointerDown, { passive: true });
+
+  // Auto-collapse if user clicks anywhere outside the toolbox when open
+  document.addEventListener('click', function (e) {
+    if (!disciplinePrefs.floatingCollapsed && bar && !bar.contains(e.target)) {
+      disciplinePrefs.floatingCollapsed = true;
+      saveDisciplinePrefs();
+      renderFloatingStampBar();
+    }
+  });
 }
 
 function renderFloatingStampBar() {
@@ -4038,19 +4061,39 @@ function renderFloatingStampBar() {
   bar.hidden = false;
   bar.style.display = 'flex';
 
+  var toggleBtn = $('fsToggleBtn');
   if (disciplinePrefs.floatingCollapsed) {
     bar.classList.add('is-collapsed');
-    var toggleBtn = $('fsToggleBtn');
-    if (toggleBtn) toggleBtn.title = '展開工具箱';
+    if (toggleBtn) {
+      toggleBtn.title = '展開快速蓋印選單';
+      toggleBtn.textContent = '▾';
+    }
   } else {
     bar.classList.remove('is-collapsed');
-    var toggleBtn2 = $('fsToggleBtn');
-    if (toggleBtn2) toggleBtn2.title = '收起工具箱';
+    if (toggleBtn) {
+      toggleBtn.title = '收起快速蓋印選單';
+      toggleBtn.textContent = '▴';
+    }
+  }
+
+  // Update current selection indicator beside "⚡ 快速蓋印"
+  var tagEl = $('fsCurrentTag');
+  if (tagEl) {
+    if (activeStamp === 'none') {
+      tagEl.textContent = '自選';
+      tagEl.className = 'fs-current-tag';
+    } else if (STAMPS[activeStamp]) {
+      tagEl.textContent = STAMPS[activeStamp].icon + ' ' + STAMPS[activeStamp].label;
+      tagEl.className = 'fs-current-tag is-active-stamp' + (activeStamp === 'washroom' ? ' is-washroom' : '');
+    } else {
+      tagEl.textContent = '自選';
+      tagEl.className = 'fs-current-tag';
+    }
   }
 
   var chipsBox = $('floatingStampChips');
   if (!chipsBox) return;
-  var chips = disciplinePrefs.floatingChips || ['no_hw', 'no_book', 'sleeping', 'talking', 'good_perf', 'warning'];
+  var chips = disciplinePrefs.floatingChips || ['no_hw', 'no_book', 'sleeping', 'talking', 'device', 'washroom', 'good_perf', 'warning'];
 
   var html = '<button type="button" class="fs-chip ' + (activeStamp === 'none' ? 'is-active' : '') + '" data-fs-stamp="none">👆 自選</button>';
   chips.forEach(function (tp) {
@@ -4063,8 +4106,12 @@ function renderFloatingStampBar() {
   chipsBox.innerHTML = html;
 
   Array.prototype.forEach.call(chipsBox.querySelectorAll('[data-fs-stamp]'), function (b) {
-    b.addEventListener('click', function () {
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
       activeStamp = b.dataset.fsStamp;
+      // Auto-collapse floating menu upon choosing option
+      disciplinePrefs.floatingCollapsed = true;
+      saveDisciplinePrefs();
       renderFloatingStampBar();
       if (activeStamp === 'none') toast('模式：點擊學生開啟個人檔案');
       else toast('一鍵蓋印模式：' + STAMPS[activeStamp].icon + ' ' + STAMPS[activeStamp].label);

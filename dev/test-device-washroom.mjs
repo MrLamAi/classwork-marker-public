@@ -27,11 +27,21 @@ assert(stylesCss.includes('.tile-washroom-indicator'), 'Must define .tile-washro
 assert(stylesCss.includes('.badge-device'), 'Must define badge-device');
 assert(stylesCss.includes('.badge-washroom'), 'Must define badge-washroom');
 
-console.log('=== 3. Checking public/index.html UI Elements ===');
+console.log('=== 3. Checking public/index.html UI Elements & Settings ===');
 const indexHtml = fs.readFileSync('public/index.html', 'utf8');
 assert(indexHtml.includes('id="shWashroomBtn"'), 'Must have shWashroomBtn');
 assert(indexHtml.includes('data-sh-stamp="device"'), 'Must have device stamp button');
 assert(indexHtml.includes('data-sh-stamp="washroom"'), 'Must have washroom stamp button');
+assert(indexHtml.includes('id="fsCurrentTag"'), 'Must have fsCurrentTag in floating bar header');
+assert(indexHtml.includes('<input type="checkbox" value="device" checked> <span>📱 展示電子器材</span>'), 'Settings must include device chip choice');
+assert(indexHtml.includes('<input type="checkbox" value="washroom" checked> <span>🚻 上洗手間</span>'), 'Settings must include washroom chip choice');
+
+console.log('=== 4. Checking Floating Bar Menu Behavior & Tag Updates ===');
+assert(appJs.includes("disciplinePrefs.floatingCollapsed = true;"), 'Must auto-collapse on item selection');
+assert(appJs.includes("chips.indexOf('device') === -1"), 'Must auto-migrate device chip if missing from saved preferences');
+assert(appJs.includes("chips.indexOf('washroom') === -1"), 'Must auto-migrate washroom chip if missing from saved preferences');
+assert(appJs.includes("tagEl.textContent = '自選';"), 'Must set default tag to 自選');
+assert(stylesCss.includes('.fs-current-tag'), 'Must define .fs-current-tag styling');
 
 console.log('=== 4. Checking Database & Action Backend Handling ===');
 import { register } from 'node:module';

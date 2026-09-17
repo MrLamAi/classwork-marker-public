@@ -131,8 +131,8 @@
   <div class="floating-stamp-toolbox" id="floatingStampBar" hidden>
     <div class="fs-header" id="fsHeader" title="按住拖曳移動 / 點擊展開或收起">
       <span class="fs-drag-handle">⋮⋮</span>
-      <span class="fs-title" id="fsTitle">⚡ 快速蓋印</span>
-      <button type="button" class="fs-toggle-btn" id="fsToggleBtn" title="展開 / 收起工具箱">▾</button>
+      <span class="fs-title" id="fsTitle">⚡ 快速蓋印 <span class="fs-current-tag" id="fsCurrentTag">自選</span></span>
+      <button type="button" class="fs-toggle-btn" id="fsToggleBtn" title="展開 / 收起選單">▾</button>
     </div>
     <div class="fs-body" id="fsBody">
       <div class="fs-chips" id="floatingStampChips"></div>
@@ -694,6 +694,8 @@ Date,DayName,Cycle,CycleDay,TimetableType,Event
                 <label class="pref-chip-choice"><input type="checkbox" value="no_book" checked> <span>📖 欠帶課本</span></label>
                 <label class="pref-chip-choice"><input type="checkbox" value="sleeping" checked> <span>😴 課堂睡覺</span></label>
                 <label class="pref-chip-choice"><input type="checkbox" value="talking" checked> <span>🗣️ 說話分心</span></label>
+                <label class="pref-chip-choice"><input type="checkbox" value="device" checked> <span>📱 展示電子器材</span></label>
+                <label class="pref-chip-choice"><input type="checkbox" value="washroom" checked> <span>🚻 上洗手間</span></label>
                 <label class="pref-chip-choice"><input type="checkbox" value="good_perf" checked> <span>⭐ 積極答問</span></label>
                 <label class="pref-chip-choice"><input type="checkbox" value="warning" checked> <span>⚠️ 違規警告</span></label>
               </div>
@@ -906,7 +908,7 @@ Date,DayName,Cycle,CycleDay,TimetableType,Event
 
       <div class="modal-foot" style="display:flex;align-items:center;justify-content:space-between;width:100%">
         <div class="settings-version-tag" id="settingsVersionTag" style="font-size:11px;color:var(--muted);font-family:var(--font-mono,ui-monospace,monospace);letter-spacing:0.2px">
-          ver. 2.6.0 · <span id="settingsCommitHash">949bf7d</span>
+          ver. 2.6.1 · <span id="settingsCommitHash">97121c0</span>
         </div>
         <button type="button" class="tool primary" data-close="settingsModal">完成 / 關閉</button>
       </div>
