@@ -31,7 +31,7 @@ export function seed() {
     ['楊美玲', 'Yeung Mei Ling', 'Amy', 'F'], ['郭子晴', 'Kwok Tsz Ching', '', 'F'],
     ['歐陽建', 'Au Yeung Kin', '', 'M'], ['潘思慧', 'Poon Sze Wai', '', 'F'],
     ['周家豪', 'Chow Ka Ho', '', 'M'], ['譚婉婷', 'Tam Yuen Ting', '', 'F'],
-    ['馮志偉', 'Fung Chi Wai', '', 'M'], ['蘇文杰', 'So文傑', '', 'M'],
+    ['馮志偉', 'Fung Chi Wai', '', 'M'], ['蘇文杰', 'So Man Kit', '', 'M'],
     ['劉凱靖', 'Lau Hoi Ching', '', 'F'], ['葉家文', 'Yip Ka Man', '', 'M'],
     ['麥子翹', 'Mak Tsz Kiu', '', 'F'], ['沈穎恩', 'Shum Wing Yan', 'Grace', 'F']
   ];

@@ -1609,8 +1609,8 @@ function updateTileDesignPreview() {
     else if (f === 'classno') { vals[key] = String(sampleN); }
     else if (f === 'seat') { vals[key] = '#' + (sampleSeat + 1); }
     else if (f === 'sex') { vals[key] = '男'; }
-    else if (f === 'name' || f === 'name_zh') { vals[key] = '陳俊熙'; }
-    else if (f === 'name_en') { vals[key] = 'Chan Chun Hei'; }
+    else if (f === 'name' || f === 'name_zh') { vals[key] = '陳大文'; }
+    else if (f === 'name_en') { vals[key] = 'Chan Tai Man'; }
     else if (f === 'time') { vals[key] = '10:32'; }
     else { vals[key] = ''; }
   }
