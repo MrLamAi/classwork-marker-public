@@ -815,8 +815,22 @@ function wire() {
   }
 
   // Tile design field selectors
-  ['tdTopLeft', 'tdTopRight', 'tdMain', 'tdBottom'].forEach(function (id) {
+  ['tdTopLeft', 'tdTopRight', 'tdMain', 'tdBottom', 'tdTime'].forEach(function (id) {
     if ($(id)) $(id).addEventListener('change', function () { applyTileDesignFromControls(); });
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('.td-align-btn'), function (btn) {
+    btn.addEventListener('click', function () {
+      var sel = document.querySelector('.td-item.td-selected');
+      if (!sel) return;
+      var key = sel.dataset.item;
+      if (!key || !tileDesign[key]) return;
+      tileDesign[key].align = btn.dataset.align || 'center';
+      saveTileDesign();
+      updateTileDesignPreview();
+      selectTileDesignItem(key);
+      render();
+    });
   });
 
   // Tile design reset
@@ -1043,6 +1057,27 @@ function renderBar() {
     return '<option value="' + esc(d) + '"' + (d === S.date ? ' selected' : '') + '>' + esc(label) + '</option>';
   }).join('');
 
+  if ($('datePickerText')) {
+    $('datePickerText').textContent = S.date || today;
+  }
+
+  var menuItems = $('dateMenuItems');
+  if (menuItems) {
+    menuItems.innerHTML = sortedDates.map(function (d) {
+      var label = d;
+      if (d === today) {
+        label = d + '（今日）';
+      } else if (d === S.scheduledPreviousDate) {
+        label = d + '（排程上一堂）';
+      }
+      var isCur = (d === S.date);
+      return '<button type="button" class="date-menu-item ' + (isCur ? 'is-selected' : '') + '" data-jump-date="' + esc(d) + '">' +
+        '<span class="date-item-label">' + esc(label) + '</span>' +
+        (isCur ? '<span class="date-item-check">✓</span>' : '') +
+      '</button>';
+    }).join('');
+  }
+
   cSel.disabled = dSel.disabled = editMode;
 
   updateMeter();
@@ -1075,7 +1110,9 @@ function renderBar() {
 
 function renderScheduleBanner() {
   var banner = $('scheduleNoticeBanner');
-  if (!banner || !window.ScheduleEngine || !S) return;
+  var badge = $('dateNoticeBadge');
+  var warnBox = $('dateMenuWarningBox');
+  if (!window.ScheduleEngine || !S) return;
 
   var curDate = S.date || todayDateStr();
   var today = todayDateStr();
@@ -1093,15 +1130,22 @@ function renderScheduleBanner() {
     ? ScheduleEngine.getCurrentPeriod(curTime, cycleInfo.tt)
     : null;
 
-  banner.className = 'schedule-banner';
-  banner.hidden = false;
+  if (banner) {
+    banner.className = 'schedule-banner';
+    banner.hidden = true; // Folded into date dropdown menu to preserve vertical screen space
+  }
 
   var leftHtml = '';
   var rightHtml = '';
+  var hasWarning = false;
+  var badgeText = '';
+  var badgeKind = '';
 
   // Case 1: Non-school cycle day (Holiday / Weekend / Special non-cycle day)
   if (!cycleInfo || !cycleInfo.isSchoolCycleDay) {
-    banner.classList.add('is-holiday');
+    hasWarning = true;
+    badgeText = '🏫 1';
+    badgeKind = 'has-warning';
     var eventDesc = (cycleInfo && cycleInfo.event) ? ('（' + esc(cycleInfo.event) + '）') : '（假期 / 非循環上課日）';
     leftHtml = '<div class="schedule-banner-left">' +
       '<span class="schedule-badge">🏫 非課堂日</span> ' +
@@ -1110,7 +1154,9 @@ function renderScheduleBanner() {
   }
   // Case 2: Selected class has NO lesson today (Off-schedule / Make-up lesson)
   else if (classLessonsToday.length === 0) {
-    banner.classList.add('is-off-schedule');
+    hasWarning = true;
+    badgeText = '⚠️ 1';
+    badgeKind = 'has-warning';
     var cDayLabel = 'Day ' + cycleInfo.cycleDay + (cycleInfo.tt !== 'Normal' ? ' · ' + cycleInfo.tt : '');
     var regSummary = prof ? ('（' + S.cls + ' 常規為 ' + prof.summary + '）') : '';
     leftHtml = '<div class="schedule-banner-left">' +
@@ -1130,14 +1176,15 @@ function renderScheduleBanner() {
       var isThisClassNow = activeLessonNow && ScheduleEngine.matchClass(S.cls, activeLessonNow.class);
 
       if (isThisClassNow) {
-        banner.classList.add('is-active');
         leftHtml = '<div class="schedule-banner-left">' +
           '<span class="schedule-badge">🟢 現正上課中</span> ' +
           '<span><b>' + esc(S.cls) + ' 班</b> · 第 ' + periodInfo.period + ' 堂 (' + periodInfo.start + '–' + periodInfo.end + ') · ' + room + '室' +
           ' <span class="muted">(尚餘 ' + periodInfo.minsRemaining + ' 分鐘)</span></span>' +
           '</div>';
       } else if (activeLessonNow) {
-        banner.classList.add('is-suggest');
+        hasWarning = true;
+        badgeText = '🔔 1';
+        badgeKind = 'has-info';
         leftHtml = '<div class="schedule-banner-left">' +
           '<span class="schedule-badge">🔔 目前課堂</span> ' +
           '<span>現在為第 ' + periodInfo.period + ' 堂 (' + periodInfo.start + '–' + periodInfo.end + ')：<b>' + esc(activeLessonNow.class) + ' 班</b> (' + activeLessonNow.room + '室)。</span>' +
@@ -1145,7 +1192,6 @@ function renderScheduleBanner() {
           '</div>';
       }
     } else {
-      banner.classList.add('is-active');
       var cDayLabel = 'Cycle ' + cycleInfo.cycle + ' · Day ' + cycleInfo.cycleDay + (cycleInfo.tt !== 'Normal' ? ' (' + cycleInfo.tt + ')' : '');
       leftHtml = '<div class="schedule-banner-left">' +
         '<span class="schedule-badge">📅 課堂安排</span> ' +
@@ -1172,7 +1218,24 @@ function renderScheduleBanner() {
 
   rightHtml = '<div class="schedule-banner-right">' + navItems.join('') + '</div>';
 
-  banner.innerHTML = leftHtml + rightHtml;
+  if (badge) {
+    if (hasWarning && badgeText) {
+      badge.hidden = false;
+      badge.textContent = badgeText;
+      badge.className = 'date-notice-badge ' + badgeKind;
+    } else {
+      badge.hidden = true;
+    }
+  }
+
+  if (warnBox) {
+    warnBox.innerHTML = '<div class="schedule-banner" style="margin:0;border:none">' + leftHtml + rightHtml + '</div>';
+    warnBox.style.display = 'block';
+  }
+
+  if (banner) {
+    banner.innerHTML = leftHtml + rightHtml;
+  }
 }
 
 function updateMeter() {
@@ -1254,7 +1317,7 @@ function seatEl(gi) {
  * @param {number|null} from - seat grid index (null if unseated / reserve)
  */
 function tileFieldValue(field, n, from) {
-  if (field === 'none') return '';
+  if (!field || field === 'none') return '';
   if (field === 'classno') return String(n);
   if (field === 'seat') return (from !== null) ? '#' + (from + 1) : '';
   if (field === 'sex') {
@@ -1270,7 +1333,7 @@ function tileFieldValue(field, n, from) {
     var r3 = studentOf(n);
     return r3 ? (r3.en || r3.name || '') : '';
   }
-  if (field === 'time') return '';  // filled by paintTile
+  if (field === 'time') return (S && S.status && S.status[String(n)]) ? S.status[String(n)] : '';
   return '';
 }
 
@@ -1294,14 +1357,17 @@ function tileEl(n, from) {
   var trVal = tileFieldValue(td.topright.field, n, from);
   var mainVal = tileFieldValue(td.main.field, n, from);
   var btmVal = tileFieldValue(td.bottom.field, n, from);
+  var timeVal = tileFieldValue(td.time.field, n, from);
   var nm = nameOf(n);
 
   var html = '';
-  if (tlVal) html += '<span class="t-seat" style="font-size:' + td.topleft.size + 'px">' + esc(tlVal) + '</span>';
-  if (trVal) html += '<span class="t-seat" style="font-size:' + td.topright.size + 'px;left:auto;right:6px">' + esc(trVal) + '</span>';
-  html += '<span class="t-num" style="font-size:' + td.main.size + 'px">' + esc(mainVal) + '</span>';
-  if (btmVal && showNames) html += '<span class="t-name" style="font-size:' + td.bottom.size + 'px">' + esc(btmVal) + '</span>';
-  html += '<span class="t-time" style="font-size:' + td.time.size + 'px"></span>';
+  if (tlVal) html += '<span class="t-seat" style="font-size:' + td.topleft.size + 'px;text-align:' + (td.topleft.align || 'left') + '">' + esc(tlVal) + '</span>';
+  if (trVal) html += '<span class="t-seat" style="font-size:' + td.topright.size + 'px;left:auto;right:6px;text-align:' + (td.topright.align || 'right') + '">' + esc(trVal) + '</span>';
+  html += '<span class="t-num" style="font-size:' + td.main.size + 'px;text-align:' + (td.main.align || 'center') + '">' + esc(mainVal) + '</span>';
+  if (btmVal && showNames) html += '<span class="t-name" style="font-size:' + td.bottom.size + 'px;text-align:' + (td.bottom.align || 'center') + '">' + esc(btmVal) + '</span>';
+  if (td.time && td.time.field !== 'none') {
+    html += '<span class="t-time" style="font-size:' + td.time.size + 'px;text-align:' + (td.time.align || 'center') + '">' + (td.time.field === 'time' ? '' : esc(timeVal)) + '</span>';
+  }
 
   b.innerHTML = html;
 
@@ -1342,15 +1408,24 @@ function paintTile(b, n) {
   b.classList.toggle('picked', !!picked && picked.n === n);
   b.setAttribute('aria-pressed', time ? 'true' : 'false');
   var t = b.querySelector('.t-time');
-  if (t) t.textContent = time || '';
+  if (t) {
+    var tdTime = (tileDesign && tileDesign.time) ? tileDesign.time.field : 'time';
+    if (tdTime === 'time') {
+      t.textContent = time || '';
+    } else {
+      var seatIdx = (b.parentElement && b.parentElement.dataset.idx) ? (parseInt(b.parentElement.dataset.idx, 10) - 1) : null;
+      t.textContent = tileFieldValue(tdTime, n, seatIdx);
+    }
+  }
 
   // Render discipline event badges
   var badgeWrap = b.querySelector('.t-badges');
   if (!badgeWrap) {
     badgeWrap = document.createElement('span');
-    badgeWrap.className = 't-badges';
     b.appendChild(badgeWrap);
   }
+  var bPos = disciplinePrefs.badgePos || 'top-right';
+  badgeWrap.className = 't-badges pos-' + bPos;
 
   var bMode = disciplinePrefs.badgeMode || 'icons';
   if (bMode === 'off') {
@@ -1722,19 +1797,19 @@ function initTileDesignTab() {
   $('tdTopRight').value = tileDesign.topright.field;
   $('tdMain').value = tileDesign.main.field;
   $('tdBottom').value = tileDesign.bottom.field;
+  if ($('tdTime')) $('tdTime').value = tileDesign.time.field;
 
   updateTileDesignPreview();
-  // Clear selection
-  document.querySelectorAll('.td-item').forEach(function (el) { el.classList.remove('td-selected'); });
-  $('tdSliderBox').hidden = true;
+  selectTileDesignItem('main');
 }
 
-/** Read values from the four select controls and apply to tileDesign. */
+/** Read values from the select controls and apply to tileDesign. */
 function applyTileDesignFromControls() {
   tileDesign.topleft.field = $('tdTopLeft').value;
   tileDesign.topright.field = $('tdTopRight').value;
   tileDesign.main.field = $('tdMain').value;
   tileDesign.bottom.field = $('tdBottom').value;
+  if ($('tdTime')) tileDesign.time.field = $('tdTime').value;
   saveTileDesign();
   updateTileDesignPreview();
   render();
@@ -1746,14 +1821,6 @@ function updateTileDesignPreview() {
   var sampleN = 17;
   var sampleSeat = 0; // seat index 0 = seat #1
   var td = tileDesign;
-
-  var labels = {
-    topleft: { label: '左上角 Top-Left' },
-    topright: { label: '右上角 Top-Right' },
-    main: { label: '中間大字 Main' },
-    bottom: { label: '底部小字 Bottom' },
-    time: { label: '時間 Time' }
-  };
 
   var pvItems = {
     topleft: $('tdPvTopLeft'),
@@ -1779,8 +1846,10 @@ function updateTileDesignPreview() {
 
   for (var k2 in pvItems) {
     var el = pvItems[k2];
+    if (!el) continue;
     el.textContent = vals[k2];
     el.style.fontSize = td[k2].size + 'px';
+    el.style.textAlign = td[k2].align || 'center';
     el.style.display = vals[k2] ? '' : 'none';
   }
 }
@@ -1791,21 +1860,32 @@ function selectTileDesignItem(itemKey) {
     topleft: '左上角 Top-Left',
     topright: '右上角 Top-Right',
     main: '中間大字 Main',
-    bottom: '底部小字 Bottom',
-    time: '時間 Time'
+    bottom: '底部文字 Bottom',
+    time: '時間 / 補充標籤 Time'
   };
 
   document.querySelectorAll('.td-item').forEach(function (el) {
     el.classList.toggle('td-selected', el.dataset.item === itemKey);
   });
 
+  // Dual highlight: sync highlight on left field group
+  document.querySelectorAll('.td-field-group').forEach(function (fg) {
+    fg.classList.toggle('td-field-active', fg.dataset.tditem === itemKey);
+  });
+
   var cfg = tileDesign[itemKey];
   if (!cfg) return;
 
   $('tdSliderBox').hidden = false;
-  $('tdSliderLabel').textContent = (labels[itemKey] || itemKey) + ' font size:';
+  $('tdSliderLabel').textContent = (labels[itemKey] || itemKey) + ' 字體大小:';
   $('tdSlider').value = cfg.size;
   $('tdSliderVal').textContent = cfg.size + 'px';
+
+  // Highlight active alignment button
+  var align = cfg.align || 'center';
+  document.querySelectorAll('.td-align-btn').forEach(function (btn) {
+    btn.classList.toggle('is-active', btn.dataset.align === align);
+  });
 }
 
 /* ============================================================= xClass export */
@@ -1925,68 +2005,52 @@ function exportXClassForClass(clsName, fmt) {
   }
 }
 
-function renderClassListTable() {
-  var box = $('classListTable');
+function renderClassMgmt() {
   var list = S.classList || (S.classes || []).map(function (c) {
     return { name: c, total: S.total, cols: S.cols };
   });
 
-  var html = '<table class="classes-table"><thead><tr>' +
-    '<th>Class / 班別</th><th>Students / 學生數</th><th>Cols / 每行</th><th>Actions / 操作</th>' +
-    '</tr></thead><tbody>';
+  var sideList = $('classMgmtList');
+  if (sideList) {
+    sideList.innerHTML = list.map(function (c) {
+      var isCur = (c.name === S.cls);
+      return '<div class="class-item-chip ' + (isCur ? 'is-current' : '') + '" data-switch-cls="' + esc(c.name) + '">' +
+        '<span class="class-item-name">' + esc(c.name) + '</span>' +
+        (isCur ? '<span class="class-item-badge">目前班級</span>' : '') +
+      '</div>';
+    }).join('');
 
-  list.forEach(function (c) {
-    var isCur = (c.name === S.cls);
-    html += '<tr class="' + (isCur ? 'active-class-row' : '') + '">' +
-      '<td><b>' + esc(c.name) + '</b>' + (isCur ? ' <span class="cls-tag">Current</span>' : '') + '</td>' +
-      '<td>' + (c.total || S.total) + '</td>' +
-      '<td>' + (c.cols || S.cols) + '</td>' +
-      '<td class="actions-cell">' +
-        '<button type="button" class="tool small-tool" data-xclass-cls="' + esc(c.name) + '" title="Export xClass CSV">xClass CSV</button> ' +
-        (!isCur ? '<button type="button" class="tool small-tool" data-switch-cls="' + esc(c.name) + '">Switch</button> ' : '') +
-        '<button type="button" class="tool quiet-danger small-tool" data-del-cls="' + esc(c.name) + '">Delete</button>' +
-      '</td>' +
-    '</tr>';
-  });
-  html += '</tbody></table>';
-  box.innerHTML = html;
-
-  box.querySelectorAll('[data-xclass-cls]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var fmt = $('xclassFmtSel') ? $('xclassFmtSel').value : 'en';
-      exportXClassForClass(b.dataset.xclassCls, fmt);
-    });
-  });
-
-  box.querySelectorAll('[data-switch-cls]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      closeModal('classSetupModal');
-      load(b.dataset.switchCls, '').catch(fail);
-    });
-  });
-
-  box.querySelectorAll('[data-del-cls]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var name = b.dataset.delCls;
-      ask({
-        title: 'Delete class ' + name + '?',
-        msg: 'This permanently deletes class ' + name + ', its seating plan, sessions, marks, and student list.',
-        ok: 'Delete class',
-        onOk: function () {
-          post({ action: 'deleteClass', cls: name })
-            .then(function () {
-              toast('Class ' + name + ' deleted', 'ok');
-              var nextCls = (name === S.cls) ? '' : S.cls;
-              return load(nextCls, '');
-            })
-            .then(function () {
-              openClassSetup('classes');
-            })
-            .catch(fail);
+    sideList.querySelectorAll('[data-switch-cls]').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        var targetCls = chip.dataset.switchCls;
+        if (targetCls && targetCls !== S.cls) {
+          load(targetCls, '').then(function () {
+            openSettingsModal('classes');
+            toast('已切換至 ' + targetCls + ' 班', 'ok');
+          }).catch(fail);
         }
       });
     });
-  });
+  }
+
+  if ($('setupCurCls')) $('setupCurCls').textContent = S.cls;
+  if ($('clsTotalInput')) $('clsTotalInput').value = S.total;
+  if ($('clsColsInput')) $('clsColsInput').value = S.cols;
+
+  var currentCols = S.cols || 8;
+  var currentTotal = S.total || 40;
+  var rows = Math.ceil(currentTotal / currentCols);
+  if ($('clsRowsInput')) $('clsRowsInput').value = rows;
+  if ($('clsCapacityVal')) $('clsCapacityVal').textContent = rows * currentCols;
+
+  if ($('deleteCurClsBtn')) {
+    $('deleteCurClsBtn').disabled = (list.length <= 1);
+    $('deleteCurClsBtn').title = (list.length <= 1) ? '唯一班級不可刪除' : '刪除此班級';
+  }
+}
+
+function renderClassListTable() {
+  renderClassMgmt();
 }
 
 function showTab(name) {
@@ -1995,18 +2059,23 @@ function showTab(name) {
 
 function renderRoster() {
   var box = $('rosterList');
-  if (!box) return;
+  if (!box || !S) return;
   box.innerHTML = '';
-  var rosterTotal = S._rosterTotal || S.total;
+  var rosterTotal = S._rosterTotal || S.total || 40;
+
+  if (!rosterDraft) {
+    rosterDraft = {};
+    for (var k in (S.names || {})) rosterDraft[k] = Object.assign({}, S.names[k]);
+  }
 
   for (var n = 1; n <= rosterTotal; n++) {
     var rec = rosterDraft[n] || {};
     var row = document.createElement('div');
     row.className = 'rrow';
-    row.draggable = true;
+    row.draggable = false;
     row.dataset.no = n;
     row.innerHTML =
-      '<span class="rgrip" aria-hidden="true" title="Drag to move to a different number">&#8942;&#8942;</span>' +
+      '<span class="rgrip" aria-hidden="true" title="按住拖曳可調整學號順序">&#8942;&#8942;</span>' +
       '<span class="rno">' + n + '</span>' +
       '<input class="rname" data-f="zh" type="text" value="' + esc(rec.zh || '') + '" placeholder="中文姓名">' +
       '<input class="rname" data-f="en" type="text" value="' + esc(rec.en || rec.name || '') + '" placeholder="English Name">' +
@@ -2016,6 +2085,31 @@ function renderRoster() {
         '<option value="F"' + (rec.sex === 'F' ? ' selected' : '') + '>F (女)</option>' +
       '</select>';
     box.appendChild(row);
+
+    // Only allow drag when grabbing the grip handle
+    var grip = row.querySelector('.rgrip');
+    if (grip) {
+      grip.addEventListener('mousedown', function () {
+        row.draggable = true;
+      });
+      grip.addEventListener('mouseup', function () {
+        row.draggable = false;
+      });
+      grip.addEventListener('touchstart', function () {
+        row.draggable = true;
+      }, { passive: true });
+      grip.addEventListener('touchend', function () {
+        row.draggable = false;
+      });
+    }
+
+    // Never trigger drag when clicking/highlighting inside text inputs or select
+    row.querySelectorAll('input, select').forEach(function (inp) {
+      inp.addEventListener('mousedown', function (e) {
+        row.draggable = false;
+        e.stopPropagation();
+      });
+    });
   }
 
   box.querySelectorAll('[data-f]').forEach(function (el) {
@@ -2041,11 +2135,17 @@ function renderRoster() {
       e.dataTransfer.setData('text/plain', String(dragRow));
       setTimeout(function () { row.classList.add('ghost'); }, 0);
     });
-    row.addEventListener('dragend', function () { row.classList.remove('ghost'); dragRow = null; });
+    row.addEventListener('dragend', function () {
+      row.classList.remove('ghost');
+      row.draggable = false;
+      dragRow = null;
+    });
     row.addEventListener('dragover', function (e) { e.preventDefault(); row.classList.add('over'); });
     row.addEventListener('dragleave', function () { row.classList.remove('over'); });
     row.addEventListener('drop', function (e) {
-      e.preventDefault(); row.classList.remove('over');
+      e.preventDefault();
+      row.classList.remove('over');
+      row.draggable = false;
       if (dragRow) { moveRecord(dragRow, Number(row.dataset.no)); renderRoster(); }
       dragRow = null;
     });
@@ -2687,6 +2787,8 @@ function renderStudentHistoryStats(n) {
 
 /* ============================================== unified settings modal */
 
+var overviewCurrentView = 'daily'; // 'daily' | 'cumulative' | 'history'
+
 function openSettingsModal(tab) {
   if (!S) return;
   tab = tab || 'overview';
@@ -2696,13 +2798,7 @@ function openSettingsModal(tab) {
   renderOverviewTab();
 
   // Tab 2: Classes
-  $('setupCurCls').textContent = S.cls;
-  $('clsTotalInput').value = S.total;
-  $('clsColsInput').value = S.cols;
-  $('newClsName').value = '';
-  $('newClsTotal').value = 40;
-  $('newClsCols').value = 8;
-  renderClassListTable();
+  renderClassMgmt();
 
   // Tab 3: Roster
   rosterEditCls = S.cls;
@@ -2739,112 +2835,355 @@ function showSettingsTab(tab) {
 }
 
 function renderOverviewTab() {
-  $('overviewCurCls').textContent = S.cls;
-  $('overviewCurDate').textContent = S.date || todayDateStr();
+  if (!S) return;
 
+  // Sync class selector
+  var clsSel = $('overviewClsSel');
+  if (clsSel && S.classes) {
+    clsSel.innerHTML = S.classes.map(function (c) {
+      return '<option value="' + esc(c) + '"' + (c === S.cls ? ' selected' : '') + '>' + esc(c) + ' 班' + (c === S.cls ? ' (目前)' : '') + '</option>';
+    }).join('');
+  }
+
+  // Sync view pills
+  Array.prototype.forEach.call(document.querySelectorAll('.overview-view-pill'), function (pill) {
+    pill.classList.toggle('is-active', pill.dataset.view === overviewCurrentView);
+  });
+
+  var dateWrap = $('overviewDateWrap');
+  var dateSel = $('overviewDateSel');
+  var calibCard = $('overviewCalibrationCard');
+  var tableTitle = $('overviewTableTitle');
+  var thead = $('logSummaryThead');
+  var tbody = $('logSummaryTbody');
   var statsGrid = $('overviewStatsGrid');
+
   var stats = (S.discipline && S.discipline.studentStats) ? S.discipline.studentStats : {};
   var totalStudents = S.total;
+  var curD = S.date || todayDateStr();
 
-  var counts = {
-    no_hw: 0,
-    no_book: 0,
-    sleeping: 0,
-    talking: 0,
-    good_perf: 0,
-    warning: 0,
-    classworkDone: doneCount()
-  };
+  // 1. Daily View (當日課堂日誌)
+  if (overviewCurrentView === 'daily') {
+    if (dateWrap) dateWrap.style.display = 'flex';
+    if (calibCard) calibCard.style.display = 'flex';
 
-  var totalDateRecords = 0;
-  for (var n = 1; n <= totalStudents; n++) {
-    var st = stats[String(n)];
-    if (st && st.today_badges) {
-      st.today_badges.forEach(function (b) {
-        totalDateRecords++;
-        if (counts[b.type] !== undefined) counts[b.type]++;
+    if (dateSel) {
+      var datesSet = {};
+      datesSet[todayDateStr()] = true;
+      if (S.date) datesSet[S.date] = true;
+      if (S.scheduledPreviousDate) datesSet[S.scheduledPreviousDate] = true;
+      if (Array.isArray(S.distinctLessonDates)) {
+        S.distinctLessonDates.forEach(function (d) { if (d) datesSet[d] = true; });
+      }
+      var sortedDates = Object.keys(datesSet).sort().reverse();
+      dateSel.innerHTML = sortedDates.map(function (d) {
+        var label = d + (d === todayDateStr() ? '（今日）' : '');
+        return '<option value="' + esc(d) + '"' + (d === curD ? ' selected' : '') + '>' + esc(label) + '</option>';
+      }).join('');
+    }
+
+    if (tableTitle) tableTitle.textContent = S.cls + ' 班 · ' + curD + ' 學生堂班紀錄一覽';
+
+    var counts = {
+      no_hw: 0,
+      no_book: 0,
+      sleeping: 0,
+      talking: 0,
+      good_perf: 0,
+      warning: 0,
+      classworkDone: doneCount()
+    };
+
+    var totalDateRecords = 0;
+    for (var n = 1; n <= totalStudents; n++) {
+      var st = stats[String(n)];
+      if (st && st.today_badges) {
+        st.today_badges.forEach(function (b) {
+          totalDateRecords++;
+          if (counts[b.type] !== undefined) counts[b.type]++;
+        });
+      }
+    }
+
+    statsGrid.innerHTML =
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">當日總記錄</span>' +
+        '<span class="overview-stat-val" style="color:var(--brand)">' + totalDateRecords + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">❌ 欠交功課</span>' +
+        '<span class="overview-stat-val" style="color:#991b1b">' + counts.no_hw + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">📖 欠帶課本</span>' +
+        '<span class="overview-stat-val" style="color:#9a3412">' + counts.no_book + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">😴 課堂睡覺</span>' +
+        '<span class="overview-stat-val" style="color:#6b21a8">' + counts.sleeping + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">🗣️ 說話分心</span>' +
+        '<span class="overview-stat-val" style="color:#854d0e">' + counts.talking + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">⭐ 積極答問</span>' +
+        '<span class="overview-stat-val" style="color:#166534">' + counts.good_perf + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">⚠️ 違規警告</span>' +
+        '<span class="overview-stat-val" style="color:#9f1239">' + counts.warning + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">📝 課堂作業完成</span>' +
+        '<span class="overview-stat-val" style="color:var(--done)">' + counts.classworkDone + ' / ' + totalStudents + '</span>' +
+      '</div>';
+
+    if (thead) {
+      thead.innerHTML = '<tr>' +
+        '<th style="width:48px">學號</th>' +
+        '<th>姓名</th>' +
+        '<th style="width:75px">欠交功課</th>' +
+        '<th style="width:75px">欠帶課本</th>' +
+        '<th style="width:75px">課堂睡覺</th>' +
+        '<th style="width:75px">說話分心</th>' +
+        '<th style="width:75px">積極答問</th>' +
+        '<th style="width:75px">違規警告</th>' +
+        '<th style="width:140px">課堂作業完成</th>' +
+      '</tr>';
+    }
+
+    var rowsHtml = '';
+    for (var i = 1; i <= totalStudents; i++) {
+      var st2 = stats[String(i)];
+      var badges = st2 ? (st2.today_badges || []) : [];
+      var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
+      badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
+
+      var isDone = !!(S.status && S.status[String(i)]);
+      var r = studentOf(i);
+      var zh = (r && r.zh) || '';
+      var en = (r && (r.en || r.name)) || '';
+      var nameDisp = zh ? (zh + (en ? ' ' + en : '')) : (en || ('學生 #' + i));
+
+      rowsHtml += '<tr>' +
+        '<td><b>' + i + '</b></td>' +
+        '<td>' + esc(nameDisp) + '</td>' +
+        '<td>' + (c.no_hw ? '<span class="t-badge badge-no_hw">' + c.no_hw + '</span>' : '-') + '</td>' +
+        '<td>' + (c.no_book ? '<span class="t-badge badge-no_book">' + c.no_book + '</span>' : '-') + '</td>' +
+        '<td>' + (c.sleeping ? '<span class="t-badge badge-sleeping">' + c.sleeping + '</span>' : '-') + '</td>' +
+        '<td>' + (c.talking ? '<span class="t-badge badge-talking">' + c.talking + '</span>' : '-') + '</td>' +
+        '<td>' + (c.good_perf ? '<span class="t-badge badge-good_perf">+' + c.good_perf + '</span>' : '-') + '</td>' +
+        '<td>' + (c.warning ? '<span class="t-badge badge-warning">' + c.warning + '</span>' : '-') + '</td>' +
+        '<td>' + (isDone ? '<span style="color:var(--done);font-weight:700">✓ 已完成 (' + esc(S.status[String(i)]) + ')</span>' : '<span class="muted">未繳交</span>') + '</td>' +
+      '</tr>';
+    }
+    tbody.innerHTML = rowsHtml;
+
+    var prevSel = $('overviewPrevDateSel');
+    if (prevSel) {
+      var curPrev = S.previousLessonDate || '';
+      var distinct = (S.distinctLessonDates || []).filter(function (d) { return d < curD; });
+      var phtml = '<option value="">' + (curPrev ? ('自動推算: ' + curPrev) : '（無更早課堂記錄）') + '</option>';
+      if (S.scheduledPreviousDate && !distinct.includes(S.scheduledPreviousDate)) {
+        phtml += '<option value="' + esc(S.scheduledPreviousDate) + '"' + (S.scheduledPreviousDate === curPrev ? ' selected' : '') + '>曆法排程上一堂: ' + esc(S.scheduledPreviousDate) + '</option>';
+      }
+      distinct.forEach(function (d) {
+        var isSched = (d === S.scheduledPreviousDate);
+        phtml += '<option value="' + esc(d) + '"' + (d === curPrev ? ' selected' : '') + '>' + esc(d) + (isSched ? ' (曆法排程上一堂)' : '') + '</option>';
+      });
+      prevSel.innerHTML = phtml;
+    }
+  }
+  // 2. Cumulative View (學期全期累計)
+  else if (overviewCurrentView === 'cumulative') {
+    if (dateWrap) dateWrap.style.display = 'none';
+    if (calibCard) calibCard.style.display = 'none';
+
+    if (tableTitle) tableTitle.textContent = S.cls + ' 班 · 學期全期學生紀律表現累計統計';
+
+    var cumCounts = {
+      no_hw: 0,
+      no_book: 0,
+      sleeping: 0,
+      talking: 0,
+      good_perf: 0,
+      warning: 0,
+      total_infractions: 0
+    };
+
+    for (var sn = 1; sn <= totalStudents; sn++) {
+      var sst = stats[String(sn)];
+      var tot = (sst && sst.totals) || {};
+      cumCounts.no_hw += (tot.no_hw || 0);
+      cumCounts.no_book += (tot.no_book || 0);
+      cumCounts.sleeping += (tot.sleeping || 0);
+      cumCounts.talking += (tot.talking || 0);
+      cumCounts.good_perf += (tot.good_perf || 0);
+      cumCounts.warning += (tot.warning || 0);
+      cumCounts.total_infractions += (tot.total_infractions || 0);
+    }
+
+    var numLessons = (S.distinctLessonDates || []).length;
+
+    statsGrid.innerHTML =
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">全期總違規人次</span>' +
+        '<span class="overview-stat-val" style="color:var(--danger)">' + cumCounts.total_infractions + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">❌ 欠交功課累計</span>' +
+        '<span class="overview-stat-val" style="color:#991b1b">' + cumCounts.no_hw + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">📖 欠帶課本累計</span>' +
+        '<span class="overview-stat-val" style="color:#9a3412">' + cumCounts.no_book + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">😴 課堂睡覺累計</span>' +
+        '<span class="overview-stat-val" style="color:#6b21a8">' + cumCounts.sleeping + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">🗣️ 說話分心累計</span>' +
+        '<span class="overview-stat-val" style="color:#854d0e">' + cumCounts.talking + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">⭐ 積極答問累計</span>' +
+        '<span class="overview-stat-val" style="color:#166534">' + cumCounts.good_perf + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">⚠️ 違規警告累計</span>' +
+        '<span class="overview-stat-val" style="color:#9f1239">' + cumCounts.warning + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">📅 累計開課堂數</span>' +
+        '<span class="overview-stat-val" style="color:var(--brand)">' + numLessons + ' 堂</span>' +
+      '</div>';
+
+    if (thead) {
+      thead.innerHTML = '<tr>' +
+        '<th style="width:48px">學號</th>' +
+        '<th>姓名</th>' +
+        '<th style="width:80px">欠交累計</th>' +
+        '<th style="width:80px">欠帶累計</th>' +
+        '<th style="width:80px">睡覺累計</th>' +
+        '<th style="width:80px">說話累計</th>' +
+        '<th style="width:80px">積極累計</th>' +
+        '<th style="width:80px">違規警告</th>' +
+        '<th style="width:90px">總違規次數</th>' +
+      '</tr>';
+    }
+
+    var cumRows = '';
+    for (var j = 1; j <= totalStudents; j++) {
+      var sst2 = stats[String(j)];
+      var t = (sst2 && sst2.totals) || { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0, total_infractions: 0 };
+      var r2 = studentOf(j);
+      var zh2 = (r2 && r2.zh) || '';
+      var en2 = (r2 && (r2.en || r2.name)) || '';
+      var nameDisp2 = zh2 ? (zh2 + (en2 ? ' ' + en2 : '')) : (en2 || ('學生 #' + j));
+
+      cumRows += '<tr>' +
+        '<td><b>' + j + '</b></td>' +
+        '<td>' + esc(nameDisp2) + '</td>' +
+        '<td>' + (t.no_hw ? '<span class="t-badge badge-no_hw">' + t.no_hw + '</span>' : '-') + '</td>' +
+        '<td>' + (t.no_book ? '<span class="t-badge badge-no_book">' + t.no_book + '</span>' : '-') + '</td>' +
+        '<td>' + (t.sleeping ? '<span class="t-badge badge-sleeping">' + t.sleeping + '</span>' : '-') + '</td>' +
+        '<td>' + (t.talking ? '<span class="t-badge badge-talking">' + t.talking + '</span>' : '-') + '</td>' +
+        '<td>' + (t.good_perf ? '<span class="t-badge badge-good_perf">+' + t.good_perf + '</span>' : '-') + '</td>' +
+        '<td>' + (t.warning ? '<span class="t-badge badge-warning">' + t.warning + '</span>' : '-') + '</td>' +
+        '<td>' + (t.total_infractions ? '<b style="color:#dc2626">' + t.total_infractions + ' 次</b>' : '<span class="muted">0</span>') + '</td>' +
+      '</tr>';
+    }
+    tbody.innerHTML = cumRows;
+  }
+  // 3. History View (歷次開課日誌)
+  else if (overviewCurrentView === 'history') {
+    if (dateWrap) dateWrap.style.display = 'none';
+    if (calibCard) calibCard.style.display = 'none';
+
+    if (tableTitle) tableTitle.textContent = S.cls + ' 班 · 歷次開課日誌時序清單';
+
+    var lessonDates = S.distinctLessonDates || [];
+    var totalRecs = (S.discipline && S.discipline.totalRecords) || 0;
+
+    statsGrid.innerHTML =
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">累計開課堂數</span>' +
+        '<span class="overview-stat-val" style="color:var(--brand)">' + lessonDates.length + ' 堂</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">紀律表記錄總數</span>' +
+        '<span class="overview-stat-val" style="color:var(--text)">' + totalRecs + ' 則</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">最近一次開課</span>' +
+        '<span class="overview-stat-val" style="color:#166534;font-size:16px">' + (lessonDates[0] || '無') + '</span>' +
+      '</div>' +
+      '<div class="overview-stat-card">' +
+        '<span class="overview-stat-label">曆法排程上一堂</span>' +
+        '<span class="overview-stat-val" style="color:#2563eb;font-size:16px">' + (S.scheduledPreviousDate || '無') + '</span>' +
+      '</div>';
+
+    if (thead) {
+      thead.innerHTML = '<tr>' +
+        '<th style="width:130px">開課日期</th>' +
+        '<th>週期與課堂資訊</th>' +
+        '<th style="width:100px">狀態</th>' +
+        '<th style="width:100px">操作</th>' +
+      '</tr>';
+    }
+
+    if (!lessonDates.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:16px" class="muted">目前尚無歷次開課紀錄</td></tr>';
+    } else {
+      var histRows = '';
+      lessonDates.forEach(function (ld) {
+        var cycleInfo = window.ScheduleEngine ? ScheduleEngine.getCycleDayInfo(ld) : null;
+        var cycleText = (cycleInfo && cycleInfo.isSchoolCycleDay)
+          ? ('Day ' + cycleInfo.cycleDay + (cycleInfo.tt !== 'Normal' ? ' · ' + cycleInfo.tt : ''))
+          : '課堂紀錄';
+        var isCurrent = (ld === curD);
+
+        histRows += '<tr>' +
+          '<td><b>' + esc(ld) + '</b>' + (isCurrent ? ' <span class="cls-tag" style="background:#22c55e;color:#fff;font-size:10px;padding:1px 4px;border-radius:4px">目前檢視</span>' : '') + '</td>' +
+          '<td>' + esc(cycleText) + '</td>' +
+          '<td><span style="color:var(--done);font-weight:600">✓ 有紀錄</span></td>' +
+          '<td><button type="button" class="tool small-tool" data-hist-view-date="' + esc(ld) + '">🔍 檢視當日</button></td>' +
+        '</tr>';
+      });
+      tbody.innerHTML = histRows;
+
+      tbody.querySelectorAll('[data-hist-view-date]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var targetDate = btn.dataset.histViewDate;
+          overviewCurrentView = 'daily';
+          load(S.cls, '', targetDate).then(function () {
+            renderOverviewTab();
+          }).catch(fail);
+        });
       });
     }
   }
 
-  statsGrid.innerHTML =
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">當日總記錄</span>' +
-      '<span class="overview-stat-val" style="color:var(--brand)">' + totalDateRecords + '</span>' +
-    '</div>' +
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">❌ 欠交功課</span>' +
-      '<span class="overview-stat-val" style="color:#991b1b">' + counts.no_hw + '</span>' +
-    '</div>' +
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">📖 欠帶課本</span>' +
-      '<span class="overview-stat-val" style="color:#9a3412">' + counts.no_book + '</span>' +
-    '</div>' +
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">😴 課堂睡覺</span>' +
-      '<span class="overview-stat-val" style="color:#6b21a8">' + counts.sleeping + '</span>' +
-    '</div>' +
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">🗣️ 說話分心</span>' +
-      '<span class="overview-stat-val" style="color:#854d0e">' + counts.talking + '</span>' +
-    '</div>' +
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">⭐ 積極答問</span>' +
-      '<span class="overview-stat-val" style="color:#166534">' + counts.good_perf + '</span>' +
-    '</div>' +
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">⚠️ 違規警告</span>' +
-      '<span class="overview-stat-val" style="color:#9f1239">' + counts.warning + '</span>' +
-    '</div>' +
-    '<div class="overview-stat-card">' +
-      '<span class="overview-stat-label">📝 課堂作業完成</span>' +
-      '<span class="overview-stat-val" style="color:var(--done)">' + counts.classworkDone + ' / ' + totalStudents + '</span>' +
-    '</div>';
-
-  var tbody = $('logSummaryTbody');
-  var rowsHtml = '';
-  for (var i = 1; i <= totalStudents; i++) {
-    var st2 = stats[String(i)];
-    var badges = st2 ? (st2.today_badges || []) : [];
-    var c = { no_hw: 0, no_book: 0, sleeping: 0, talking: 0, good_perf: 0, warning: 0 };
-    badges.forEach(function (b) { if (c[b.type] !== undefined) c[b.type]++; });
-
-    var isDone = !!(S.status && S.status[String(i)]);
-    var r = studentOf(i);
-    var zh = (r && r.zh) || '';
-    var en = (r && (r.en || r.name)) || '';
-    var nameDisp = zh ? (zh + (en ? ' ' + en : '')) : (en || ('學生 #' + i));
-
-    rowsHtml += '<tr>' +
-      '<td><b>' + i + '</b></td>' +
-      '<td>' + esc(nameDisp) + '</td>' +
-      '<td>' + (c.no_hw ? '<span class="t-badge badge-no_hw">' + c.no_hw + '</span>' : '-') + '</td>' +
-      '<td>' + (c.no_book ? '<span class="t-badge badge-no_book">' + c.no_book + '</span>' : '-') + '</td>' +
-      '<td>' + (c.sleeping ? '<span class="t-badge badge-sleeping">' + c.sleeping + '</span>' : '-') + '</td>' +
-      '<td>' + (c.talking ? '<span class="t-badge badge-talking">' + c.talking + '</span>' : '-') + '</td>' +
-      '<td>' + (c.good_perf ? '<span class="t-badge badge-good_perf">+' + c.good_perf + '</span>' : '-') + '</td>' +
-      '<td>' + (c.warning ? '<span class="t-badge badge-warning">' + c.warning + '</span>' : '-') + '</td>' +
-      '<td>' + (isDone ? '<span style="color:var(--done);font-weight:700">✓ 已完成 (' + esc(S.status[String(i)]) + ')</span>' : '<span class="muted">未繳交</span>') + '</td>' +
-    '</tr>';
+  // If search query is already entered, apply filter
+  if ($('overviewSearchInput') && ($('overviewSearchInput').value || '').trim()) {
+    filterOverviewTable($('overviewSearchInput').value);
   }
-  tbody.innerHTML = rowsHtml;
 
-  var prevSel = $('overviewPrevDateSel');
-  if (prevSel) {
-    var curD = S.date || todayDateStr();
-    var curPrev = S.previousLessonDate || '';
-    var distinct = (S.distinctLessonDates || []).filter(function (d) { return d < curD; });
-    var phtml = '<option value="">' + (curPrev ? ('自動推算: ' + curPrev) : '（無更早課堂記錄）') + '</option>';
-    if (S.scheduledPreviousDate && !distinct.includes(S.scheduledPreviousDate)) {
-      phtml += '<option value="' + esc(S.scheduledPreviousDate) + '"' + (S.scheduledPreviousDate === curPrev ? ' selected' : '') + '>曆法排程上一堂: ' + esc(S.scheduledPreviousDate) + '</option>';
-    }
-    distinct.forEach(function (d) {
-      var isSched = (d === S.scheduledPreviousDate);
-      phtml += '<option value="' + esc(d) + '"' + (d === curPrev ? ' selected' : '') + '>' + esc(d) + (isSched ? ' (曆法排程上一堂)' : '') + '</option>';
-    });
-    prevSel.innerHTML = phtml;
-  }
   renderConfirmLessonBtns();
+}
+
+function filterOverviewTable(query) {
+  var q = (query || '').trim().toLowerCase();
+  var tbody = $('logSummaryTbody');
+  if (!tbody) return;
+  var rows = tbody.querySelectorAll('tr');
+  rows.forEach(function (tr) {
+    if (tr.querySelector('td[colspan]')) return;
+    var text = tr.textContent.toLowerCase();
+    tr.style.display = (!q || text.indexOf(q) >= 0) ? '' : 'none';
+  });
 }
 
 function copyLogSummary() {
@@ -3261,6 +3600,10 @@ function initDisciplinePrefsTab() {
 
   Array.prototype.forEach.call(document.querySelectorAll('input[name="badgeMode"]'), function (inp) {
     inp.checked = (inp.value === disciplinePrefs.badgeMode);
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="badgePos"]'), function (inp) {
+    inp.checked = (inp.value === (disciplinePrefs.badgePos || 'top-right'));
   });
 }
 
