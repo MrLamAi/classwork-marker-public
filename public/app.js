@@ -3,8 +3,8 @@
 (function () {
 'use strict';
 
-var APP_VERSION = '2.6.2';
-var APP_COMMIT  = 'a74e7db';
+var APP_VERSION = '2.6.3';
+var APP_COMMIT  = '2e9949d';
 
 /* =============================================================== state */
 
@@ -123,6 +123,36 @@ function loadTileDesign() {
 
 function saveTileDesign() {
   try { localStorage.setItem('tileDesign', JSON.stringify(tileDesign)); } catch (e) {}
+}
+
+var ITEM_LABELS_ZH = {
+  topleft: '左上角',
+  topright: '右上角',
+  main: '中間大字',
+  bottom: '底部文字',
+  time: '時間/補充標籤'
+};
+
+function tileItemStyle(cfg, itemKey) {
+  if (!cfg) return '';
+  var sz = cfg.size || (itemKey === 'main' ? 32 : 12);
+  var align = cfg.align || (itemKey === 'topleft' ? 'left' : (itemKey === 'topright' ? 'right' : 'center'));
+  var s = 'font-size:' + sz + 'px;';
+  if (itemKey === 'topleft' || itemKey === 'topright') {
+    if (align === 'center') {
+      s += 'left:50%;right:auto;transform:translateX(-50%);text-align:center;';
+    } else if (align === 'right') {
+      s += 'left:auto;right:6px;transform:none;text-align:right;';
+    } else {
+      s += 'left:6px;right:auto;transform:none;text-align:left;';
+    }
+  } else {
+    s += 'width:100%;box-sizing:border-box;text-align:' + align + ';';
+    if (align === 'left') s += 'padding-left:8px;padding-right:2px;';
+    else if (align === 'right') s += 'padding-right:8px;padding-left:2px;';
+    else s += 'padding-left:2px;padding-right:2px;';
+  }
+  return s;
 }
 
 /* ============================================================== helpers */
@@ -813,55 +843,180 @@ function wire() {
 
   // Tile design field selectors
   ['tdTopLeft', 'tdTopRight', 'tdMain', 'tdBottom', 'tdTime'].forEach(function (id) {
-    if ($(id)) $(id).addEventListener('change', function () { applyTileDesignFromControls(); });
+    if ($(id)) {
+      $(id).addEventListener('change', function () {
+        applyTileDesignFromControls();
+        var fg = this.closest('.td-field-group');
+        if (fg && fg.dataset.tditem) selectTileDesignItem(fg.dataset.tditem);
+      });
+      $(id).addEventListener('focus', function () {
+        var fg = this.closest('.td-field-group');
+        if (fg && fg.dataset.tditem) selectTileDesignItem(fg.dataset.tditem);
+      });
+    }
   });
 
+  // Clicking left field groups selects the corresponding item for editing
+  Array.prototype.forEach.call(document.querySelectorAll('.td-field-group'), function (fg) {
+    fg.addEventListener('click', function (e) {
+      if (e.target && e.target.tagName === 'SELECT') return;
+      var itemKey = fg.dataset.tditem;
+      if (itemKey) selectTileDesignItem(itemKey);
+    });
+  });
+
+  // Alignment buttons
+  var alignLabelsZh = { left: '靠左', center: '置中', right: '靠右' };
   Array.prototype.forEach.call(document.querySelectorAll('.td-align-btn'), function (btn) {
     btn.addEventListener('click', function () {
       var sel = document.querySelector('.td-item.td-selected');
       if (!sel) return;
       var key = sel.dataset.item;
       if (!key || !tileDesign[key]) return;
-      tileDesign[key].align = btn.dataset.align || 'center';
+      var nextAlign = btn.dataset.align || 'center';
+      tileDesign[key].align = nextAlign;
       saveTileDesign();
       updateTileDesignPreview();
       selectTileDesignItem(key);
       render();
+      toast('已設定「' + (ITEM_LABELS_ZH[key] || key) + '」' + (alignLabelsZh[nextAlign] || nextAlign), 'ok');
     });
   });
 
-  // Tile design reset
+  // Tile design reset style (preserve field choices)
+  if ($('tdResetStyleBtn')) {
+    $('tdResetStyleBtn').addEventListener('click', function () {
+      for (var k in tileDesignDefaults) {
+        if (tileDesign[k]) {
+          tileDesign[k].size = tileDesignDefaults[k].size;
+          tileDesign[k].align = tileDesignDefaults[k].align;
+        }
+      }
+      saveTileDesign();
+      updateTileDesignPreview();
+      var sel = document.querySelector('.td-item.td-selected');
+      selectTileDesignItem(sel ? sel.dataset.item : 'main');
+      render();
+      toast('已還原預設字體大小與對齊樣式 (保留欄位選擇)', 'ok');
+    });
+  }
+
+  // Tile design reset all
   if ($('tdReset')) {
     $('tdReset').addEventListener('click', function () {
       tileDesign = JSON.parse(JSON.stringify(tileDesignDefaults));
       saveTileDesign();
       initTileDesignTab();
       render();
-      toast('Tile design reset to default', 'ok');
+      toast('已還原全部預設值 (欄位與樣式)', 'ok');
     });
   }
 
-  // Tile design preview card: click items to select + show slider
-  if ($('tdPreviewCard')) {
-    $('tdPreviewCard').addEventListener('click', function (e) {
-      var item = e.target.closest('[data-item]');
+  // Horizontal drag on preview card elements to align left / center / right
+  var pvCard = $('tdPreviewCard');
+  if (pvCard) {
+    var dragItemKey = null;
+    var isDraggingCardItem = false;
+    var dragStartX = 0;
+    var currentTargetAlign = null;
+
+    function onPvPointerDown(e) {
+      var item = e.target.closest('.td-item');
       if (!item) return;
-      selectTileDesignItem(item.dataset.item);
-    });
+      dragItemKey = item.dataset.item;
+      if (!dragItemKey) return;
+      selectTileDesignItem(dragItemKey);
+
+      var clientX = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
+      dragStartX = clientX;
+      isDraggingCardItem = false;
+      currentTargetAlign = tileDesign[dragItemKey] ? tileDesign[dragItemKey].align : 'center';
+
+      document.addEventListener('mousemove', onPvPointerMove, { passive: false });
+      document.addEventListener('mouseup', onPvPointerUp);
+      document.addEventListener('touchmove', onPvPointerMove, { passive: false });
+      document.addEventListener('touchend', onPvPointerUp);
+    }
+
+    function onPvPointerMove(e) {
+      if (!dragItemKey) return;
+      var clientX = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
+      var dx = clientX - dragStartX;
+
+      if (!isDraggingCardItem && Math.abs(dx) > 6) {
+        isDraggingCardItem = true;
+        pvCard.classList.add('is-dragging-card-item');
+        var itemEl = pvCard.querySelector('[data-item="' + dragItemKey + '"]');
+        if (itemEl) itemEl.classList.add('is-being-dragged');
+      }
+
+      if (isDraggingCardItem) {
+        if (e.cancelable) e.preventDefault();
+        var rect = pvCard.getBoundingClientRect();
+        var relX = clientX - rect.left;
+        var percent = relX / rect.width;
+
+        var nextAlign = 'center';
+        if (percent < 0.35) nextAlign = 'left';
+        else if (percent > 0.65) nextAlign = 'right';
+
+        if (nextAlign !== currentTargetAlign) {
+          currentTargetAlign = nextAlign;
+          if (tileDesign[dragItemKey]) {
+            tileDesign[dragItemKey].align = nextAlign;
+            updateTileDesignPreview();
+            selectTileDesignItem(dragItemKey);
+          }
+        }
+      }
+    }
+
+    function onPvPointerUp() {
+      document.removeEventListener('mousemove', onPvPointerMove);
+      document.removeEventListener('mouseup', onPvPointerUp);
+      document.removeEventListener('touchmove', onPvPointerMove);
+      document.removeEventListener('touchend', onPvPointerUp);
+
+      if (isDraggingCardItem && dragItemKey && currentTargetAlign) {
+        if (tileDesign[dragItemKey]) {
+          tileDesign[dragItemKey].align = currentTargetAlign;
+          saveTileDesign();
+          updateTileDesignPreview();
+          selectTileDesignItem(dragItemKey);
+          render();
+          toast('已將「' + (ITEM_LABELS_ZH[dragItemKey] || dragItemKey) + '」拖曳對齊至' + (alignLabelsZh[currentTargetAlign] || currentTargetAlign), 'ok');
+        }
+      }
+
+      if (pvCard) {
+        pvCard.classList.remove('is-dragging-card-item');
+        var itemEl = pvCard.querySelector('[data-item="' + dragItemKey + '"]');
+        if (itemEl) itemEl.classList.remove('is-being-dragged');
+      }
+      dragItemKey = null;
+      isDraggingCardItem = false;
+      currentTargetAlign = null;
+    }
+
+    pvCard.addEventListener('mousedown', onPvPointerDown);
+    pvCard.addEventListener('touchstart', onPvPointerDown, { passive: true });
   }
 
-  // Tile design slider
+  // Tile design slider with real-time preview & grid update
   if ($('tdSlider')) {
-    $('tdSlider').addEventListener('input', function () {
+    var updateSliderSize = function () {
       var sel = document.querySelector('.td-item.td-selected');
       if (!sel) return;
       var key = sel.dataset.item;
       var sz = parseInt(this.value, 10);
-      tileDesign[key].size = sz;
+      if (tileDesign[key]) tileDesign[key].size = sz;
       if ($('tdSliderVal')) $('tdSliderVal').textContent = sz + 'px';
       sel.style.fontSize = sz + 'px';
       saveTileDesign();
-    });
+      render();
+    };
+    $('tdSlider').addEventListener('input', updateSliderSize);
+    $('tdSlider').addEventListener('change', updateSliderSize);
   }
 
   if ($('askOk')) {
@@ -1404,12 +1559,12 @@ function tileEl(n, from) {
   var nm = nameOf(n);
 
   var html = '';
-  if (tlVal) html += '<span class="t-seat" style="font-size:' + td.topleft.size + 'px;text-align:' + (td.topleft.align || 'left') + '">' + esc(tlVal) + '</span>';
-  if (trVal) html += '<span class="t-seat" style="font-size:' + td.topright.size + 'px;left:auto;right:6px;text-align:' + (td.topright.align || 'right') + '">' + esc(trVal) + '</span>';
-  html += '<span class="t-num" style="font-size:' + td.main.size + 'px;text-align:' + (td.main.align || 'center') + '">' + esc(mainVal) + '</span>';
-  if (btmVal && showNames) html += '<span class="t-name" style="font-size:' + td.bottom.size + 'px;text-align:' + (td.bottom.align || 'center') + '">' + esc(btmVal) + '</span>';
+  if (tlVal) html += '<span class="t-seat" style="' + tileItemStyle(td.topleft, 'topleft') + '">' + esc(tlVal) + '</span>';
+  if (trVal) html += '<span class="t-seat" style="' + tileItemStyle(td.topright, 'topright') + '">' + esc(trVal) + '</span>';
+  html += '<span class="t-num" style="' + tileItemStyle(td.main, 'main') + '">' + esc(mainVal) + '</span>';
+  if (btmVal && showNames) html += '<span class="t-name" style="' + tileItemStyle(td.bottom, 'bottom') + '">' + esc(btmVal) + '</span>';
   if (td.time && td.time.field !== 'none') {
-    html += '<span class="t-time" style="font-size:' + td.time.size + 'px;text-align:' + (td.time.align || 'center') + '">' + (td.time.field === 'time' ? '' : esc(timeVal)) + '</span>';
+    html += '<span class="t-time" style="' + tileItemStyle(td.time, 'time') + '">' + (td.time.field === 'time' ? '' : esc(timeVal)) + '</span>';
   }
 
   b.innerHTML = html;
@@ -1918,8 +2073,43 @@ function updateTileDesignPreview() {
     var el = pvItems[k2];
     if (!el) continue;
     el.textContent = vals[k2];
-    el.style.fontSize = td[k2].size + 'px';
-    el.style.textAlign = td[k2].align || 'center';
+    var cfg = td[k2] || {};
+    var sz = cfg.size || (k2 === 'main' ? 32 : 12);
+    var align = cfg.align || (k2 === 'topleft' ? 'left' : (k2 === 'topright' ? 'right' : 'center'));
+
+    el.style.fontSize = sz + 'px';
+    if (k2 === 'topleft' || k2 === 'topright') {
+      if (align === 'center') {
+        el.style.left = '50%';
+        el.style.right = 'auto';
+        el.style.transform = 'translateX(-50%)';
+        el.style.textAlign = 'center';
+      } else if (align === 'right') {
+        el.style.left = 'auto';
+        el.style.right = '7px';
+        el.style.transform = 'none';
+        el.style.textAlign = 'right';
+      } else {
+        el.style.left = '7px';
+        el.style.right = 'auto';
+        el.style.transform = 'none';
+        el.style.textAlign = 'left';
+      }
+    } else {
+      el.style.width = '100%';
+      el.style.boxSizing = 'border-box';
+      el.style.textAlign = align;
+      if (align === 'left') {
+        el.style.paddingLeft = '8px';
+        el.style.paddingRight = '2px';
+      } else if (align === 'right') {
+        el.style.paddingRight = '8px';
+        el.style.paddingLeft = '2px';
+      } else {
+        el.style.paddingLeft = '2px';
+        el.style.paddingRight = '2px';
+      }
+    }
     el.style.display = vals[k2] ? '' : 'none';
   }
 }
@@ -3153,6 +3343,8 @@ function showSettingsTab(tab) {
     renderRoster();
   } else if (tab === 'schedule') {
     renderScheduleSettingsTab();
+  } else if (tab === 'tiledesign') {
+    initTileDesignTab();
   }
 }
 
