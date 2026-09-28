@@ -16,6 +16,7 @@
     "gen:xclass": "node dev/generate_xclass_csv.mjs"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "pg": "^8.13.1"
   }
 }
