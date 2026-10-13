@@ -4,7 +4,7 @@
 'use strict';
 
 var APP_VERSION = '2.6.4';
-var APP_COMMIT  = '2e9949d';
+var APP_COMMIT  = '3dedc2c';
 
 /* =============================================================== state */
 
