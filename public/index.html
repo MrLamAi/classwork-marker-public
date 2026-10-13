@@ -373,9 +373,11 @@
                 </button>
                 <div id="addClsBox" hidden style="margin-top:8px;padding:8px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line)">
                   <div class="setup-label" style="margin-bottom:4px">班別名稱</div>
-                  <input type="text" id="newClsName" class="text-input" placeholder="例如: 1B, 2A" style="margin-bottom:6px">
+                  <input type="text" id="newClsName" class="text-input" placeholder="例如: 1B, 2D-2" style="margin-bottom:6px">
+                  <div class="setup-label" style="margin-bottom:4px">人數 · 行數 · 列數（網格與人數獨立）</div>
                   <div style="display:flex;gap:4px;margin-bottom:6px">
-                    <input type="number" id="newClsTotal" class="text-input" value="40" min="1" max="100" placeholder="人數" title="學生總數">
+                    <input type="number" id="newClsTotal" class="text-input" value="32" min="1" max="100" placeholder="人數" title="學生總數">
+                    <input type="number" id="newClsRows" class="text-input" value="5" min="1" max="20" placeholder="行數" title="座位排數 / 行數">
                     <input type="number" id="newClsCols" class="text-input" value="8" min="2" max="15" placeholder="列數" title="每行列數">
                   </div>
                   <button type="button" id="addClsBtn" class="tool primary small-tool" style="width:100%">確認新增</button>
@@ -385,44 +387,50 @@
 
             <!-- Right Detail: Selected Class Settings -->
             <div class="class-mgmt-detail">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
                 <h3 class="setup-sec-title" style="margin:0">
                   班級設定：<span id="setupCurCls" class="badge" style="font-size:14px;font-weight:bold"></span>
                 </h3>
+                <span id="clsCurrentSavedTag" class="badge" style="font-size:11.5px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line)"></span>
               </div>
 
-              <div class="setup-grid" style="grid-template-columns:repeat(3, 1fr);gap:10px">
+              <div class="setup-grid" style="grid-template-columns:repeat(2, 1fr);gap:10px">
                 <label class="setup-field">
-                  <span class="setup-label">學生總數 (Total Students)</span>
+                  <span class="setup-label">班別名稱 (Class Name — 可直接修改名稱)</span>
+                  <input type="text" id="clsNameInput" class="text-input" maxlength="20" placeholder="例如: 1A, 2D-2">
+                </label>
+                <label class="setup-field">
+                  <span class="setup-label">學生總數 (Total Students — 與座位格數獨立)</span>
                   <input type="number" id="clsTotalInput" class="text-input" min="1" max="100">
                 </label>
                 <label class="setup-field">
-                  <span class="setup-label">座位排數 / 行數 (Rows)</span>
-                  <input type="number" id="clsRowsInput" class="text-input" min="1" max="20" title="座位網格前後行數">
+                  <span class="setup-label">座位排數 / 行數 (Rows — 可自由設定空位)</span>
+                  <input type="number" id="clsRowsInput" class="text-input" min="1" max="20" title="座位網格前後行數（與學生人數脫鈎）">
                 </label>
                 <label class="setup-field">
-                  <span class="setup-label">每行座位 / 列數 (Cols)</span>
-                  <input type="number" id="clsColsInput" class="text-input" min="2" max="15" title="座位網格左右列數">
+                  <span class="setup-label">每行座位 / 列數 (Cols — 可自由設定空位)</span>
+                  <input type="number" id="clsColsInput" class="text-input" min="2" max="15" title="座位網格左右列數（與學生人數脫鈎）">
                 </label>
               </div>
 
-              <div class="class-capacity-badge" id="clsCapacityBadge">
-                💡 座位網格總容量：<b id="clsCapacityVal">40</b> 個座位（行數 × 列數）
+              <div class="class-capacity-badge" id="clsCapacityBadge" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;width:100%">
+                <span>💡 座位網格總容量：<b id="clsCapacityVal">40</b> 個座位（行數 × 列數）<span id="clsEmptySeatsInfo" style="margin-left:6px"></span></span>
+                <span class="muted" style="font-size:11px">儲存後即時套用至：<b>主畫面座位表</b>、<b>學生名單人數上限</b>及<b>班別概況</b></span>
               </div>
 
-              <div style="margin-top:16px;display:flex;align-items:center;gap:10px">
-                <button id="updateClsBtn" class="tool primary">💾 儲存班級設定</button>
-                <span class="hint" id="updateClsHint"></span>
+              <div style="margin-top:14px;display:flex;align-items:center;flex-wrap:wrap;gap:10px">
+                <button type="button" id="updateClsBtn" class="tool primary">💾 儲存班級設定</button>
+                <span class="hint" id="updateClsHint" style="font-weight:600"></span>
               </div>
 
-              <hr class="setup-divider" style="margin:24px 0 16px">
+              <hr class="setup-divider" style="margin:20px 0 14px">
 
               <div class="setup-section" style="margin-top:0">
                 <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">進階班級管理</div>
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--line)">
                   <div>
                     <div style="font-weight:600;font-size:13px">刪除此班級</div>
-                    <div class="muted" style="font-size:11px">清除此班級之座次與設定（若為目前唯一班級則不可刪除）。</div>
+                    <div class="muted" style="font-size:11px">清除此班級之座次、學生名單與歷次課堂記錄（若為系統唯一班級則不可刪除）。</div>
                   </div>
                   <button type="button" id="deleteCurClsBtn" class="tool quiet-danger">🗑️ 刪除班級</button>
                 </div>
@@ -913,7 +921,7 @@ Date,DayName,Cycle,CycleDay,TimetableType,Event
 
       <div class="modal-foot" style="display:flex;align-items:center;justify-content:space-between;width:100%">
         <div class="settings-version-tag" id="settingsVersionTag" style="font-size:11px;color:var(--muted);font-family:var(--font-mono,ui-monospace,monospace);letter-spacing:0.2px">
-          ver. 2.6.3 · <span id="settingsCommitHash">2e9949d</span>
+          ver. 2.6.4 · <span id="settingsCommitHash">2e9949d</span>
         </div>
         <button type="button" class="tool primary" data-close="settingsModal">完成 / 關閉</button>
       </div>
@@ -1017,7 +1025,7 @@ Date,DayName,Cycle,CycleDay,TimetableType,Event
   </div>
 
   <!-- --------------------------------------------------------- mini dialog -->
-  <div class="backdrop" id="askModal" hidden>
+  <div class="backdrop" id="askModal" hidden style="z-index:250">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="askTitle">
       <div class="modal-head">
         <h2 id="askTitle"></h2>
@@ -1037,7 +1045,7 @@ Date,DayName,Cycle,CycleDay,TimetableType,Event
 
   <div id="toasts" class="toasts"></div>
 
-  <script src="/schedule-data.js?v=20260917_03"></script>
-  <script src="/app.js?v=20260917_03"></script>
+  <script src="/schedule-data.js?v=20260918_01"></script>
+  <script src="/app.js?v=20260918_01"></script>
 </body>
 </html>

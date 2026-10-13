@@ -84,12 +84,12 @@ export default guard(async (req, res) => {
 
     case 'createClass': {
       if (!name) return res.status(400).json({ error: 'class name required' });
-      return res.status(200).json(await createClass(name, total, cols));
+      return res.status(200).json(await createClass(name, total, cols, body.rows));
     }
 
     case 'updateClass': {
       if (!cls) return res.status(400).json({ error: 'class name required' });
-      return res.status(200).json(await updateClass(cls, total, cols));
+      return res.status(200).json(await updateClass(cls, total, cols, body.newName, body.rows));
     }
 
     case 'deleteClass': {

@@ -3,7 +3,7 @@
 (function () {
 'use strict';
 
-var APP_VERSION = '2.6.3';
+var APP_VERSION = '2.6.4';
 var APP_COMMIT  = '2e9949d';
 
 /* =============================================================== state */
@@ -223,7 +223,11 @@ function nameOf(n) {
 
 function hasAnyName(r) { return !!(r && (r.zh || r.name || r.en || r.sex)); }
 function doneCount() { return Object.keys(S ? S.status : {}).length; }
-function rowsNow() { return S ? Math.ceil(S.seats.length / S.cols) : 0; }
+function rowsNow() {
+  if (!S) return 0;
+  var seatRows = (S.seats && S.seats.length) ? Math.ceil(S.seats.length / S.cols) : 0;
+  return seatRows || S.rows || Math.ceil(S.total / S.cols);
+}
 
 function rowEmpty(r) {
   for (var i = r * S.cols; i < (r + 1) * S.cols; i++) if (S.seats[i]) return false;
@@ -648,32 +652,34 @@ function wire() {
     b.addEventListener('click', function () { closeModal(b.dataset.close); });
   });
 
-  // Class Management actions
+  // Class Management actions (Grid rows & cols are completely decoupled from total students)
   function updateCapacityDisplay() {
-    var tot = parseInt($('clsTotalInput').value, 10) || 0;
-    var cols = parseInt($('clsColsInput').value, 10) || 1;
-    var rows = parseInt($('clsRowsInput').value, 10) || 1;
-    if ($('clsCapacityVal')) $('clsCapacityVal').textContent = rows * cols;
+    var tot = parseInt($('clsTotalInput') && $('clsTotalInput').value, 10) || 0;
+    var cols = parseInt($('clsColsInput') && $('clsColsInput').value, 10) || 1;
+    var rows = parseInt($('clsRowsInput') && $('clsRowsInput').value, 10) || 1;
+    var cap = rows * cols;
+    if ($('clsCapacityVal')) $('clsCapacityVal').textContent = cap;
+    var infoEl = $('clsEmptySeatsInfo');
+    if (infoEl) {
+      var diff = cap - tot;
+      if (diff >= 0) {
+        infoEl.innerHTML = '｜學生人數：<b>' + tot + '</b> 人（可留空位：<b>' + diff + '</b> 個）';
+        infoEl.style.color = 'var(--muted)';
+      } else {
+        infoEl.innerHTML = '｜學生人數：<b>' + tot + '</b> 人（超出座位 <b>' + (-diff) + '</b> 人，將置於未排座名單）';
+        infoEl.style.color = '#b45309';
+      }
+    }
   }
 
   if ($('clsTotalInput')) {
     $('clsTotalInput').addEventListener('input', function () {
-      var tot = parseInt(this.value, 10) || 0;
-      var cols = parseInt($('clsColsInput').value, 10) || 8;
-      if (cols > 0 && tot > 0) {
-        $('clsRowsInput').value = Math.ceil(tot / cols);
-      }
       updateCapacityDisplay();
     });
   }
 
   if ($('clsColsInput')) {
     $('clsColsInput').addEventListener('input', function () {
-      var tot = parseInt($('clsTotalInput').value, 10) || 0;
-      var cols = parseInt(this.value, 10) || 1;
-      if (cols > 0 && tot > 0) {
-        $('clsRowsInput').value = Math.ceil(tot / cols);
-      }
       updateCapacityDisplay();
     });
   }
@@ -686,19 +692,61 @@ function wire() {
 
   if ($('updateClsBtn')) {
     $('updateClsBtn').addEventListener('click', function () {
+      var oldName = S.cls;
+      var newName = $('clsNameInput') ? $('clsNameInput').value.trim() : S.cls;
       var total = parseInt($('clsTotalInput').value, 10);
       var cols = parseInt($('clsColsInput').value, 10);
+      var rows = $('clsRowsInput') ? parseInt($('clsRowsInput').value, 10) : 0;
+      if (!newName) {
+        toast('請輸入班別名稱', 'err');
+        if ($('clsNameInput')) $('clsNameInput').focus();
+        return;
+      }
       if (!total || total < 1 || !cols || cols < 2) {
         toast('學生總數或列數設定無效', 'err');
         return;
       }
-      post({ action: 'updateClass', cls: S.cls, total: total, cols: cols })
+      if (!rows || rows < 1) rows = S.rows || Math.ceil(total / cols);
+      post({ action: 'updateClass', cls: oldName, newName: newName, total: total, cols: cols, rows: rows })
         .then(function () {
-          toast('班級設定已成功儲存', 'ok');
-          return load(S.cls, S.asgn);
-        })
-        .then(function () {
-          openSettingsModal('classes');
+          if (oldName !== newName) {
+            try {
+              var oldKey = 'classwork_washrooms_' + oldName;
+              var newKey = 'classwork_washrooms_' + newName;
+              var oldVal = localStorage.getItem(oldKey);
+              if (oldVal !== null) {
+                localStorage.setItem(newKey, oldVal);
+                localStorage.removeItem(oldKey);
+              }
+            } catch (_e) {}
+            if (window.ScheduleEngine && typeof window.ScheduleEngine.getSchedule === 'function' && typeof window.ScheduleEngine.setSchedule === 'function') {
+              var sched = window.ScheduleEngine.getSchedule();
+              var changedSched = false;
+              Object.keys(sched).forEach(function (dayKey) {
+                (sched[dayKey] || []).forEach(function (slot) {
+                  if (window.ScheduleEngine.matchClass(oldName, slot.class)) {
+                    slot.class = newName;
+                    if (!slot.rawClass || slot.rawClass === oldName) slot.rawClass = newName;
+                    changedSched = true;
+                  }
+                });
+              });
+              if (changedSched) window.ScheduleEngine.setSchedule(sched);
+            }
+            if (rosterEditCls === oldName) rosterEditCls = newName;
+          }
+          var emptyCount = Math.max(0, (rows * cols) - total);
+          var msg = (oldName !== newName)
+            ? '✅ 已將「' + oldName + '」改名為「' + newName + '」並儲存設定（' + total + '人 · ' + rows + '行×' + cols + '列＝' + (rows * cols) + '座位，空位 ' + emptyCount + ' 個）'
+            : '✅ 已儲存 ' + newName + ' 班設定（' + total + '人 · ' + rows + '行×' + cols + '列＝' + (rows * cols) + '座位，空位 ' + emptyCount + ' 個），已同步更新主畫面座位表與名單';
+          toast(msg, 'ok');
+          return load(newName, S.asgn).then(function () {
+            openSettingsModal('classes');
+            if ($('updateClsHint')) {
+              $('updateClsHint').textContent = msg;
+              $('updateClsHint').style.color = 'var(--ok, #15803d)';
+            }
+          });
         })
         .catch(fail);
     });
@@ -717,15 +765,16 @@ function wire() {
   if ($('addClsBtn')) {
     $('addClsBtn').addEventListener('click', function () {
       var name = $('newClsName').value.trim();
-      var total = parseInt($('newClsTotal').value, 10) || 40;
+      var total = parseInt($('newClsTotal').value, 10) || 32;
       var cols = parseInt($('newClsCols').value, 10) || 8;
+      var rows = $('newClsRows') ? (parseInt($('newClsRows').value, 10) || Math.ceil(total / cols)) : Math.ceil(total / cols);
       if (!name) {
         toast('請輸入班別名稱', 'err');
         return;
       }
-      post({ action: 'createClass', name: name, total: total, cols: cols })
+      post({ action: 'createClass', name: name, total: total, cols: cols, rows: rows })
         .then(function () {
-          toast('班級 ' + name + ' 已建立', 'ok');
+          toast('班級 ' + name + ' 已建立（' + total + '人 · ' + rows + '×' + cols + '）', 'ok');
           if ($('addClsBox')) $('addClsBox').hidden = true;
           if ($('newClsName')) $('newClsName').value = '';
           return load(name, '');
@@ -739,28 +788,7 @@ function wire() {
 
   if ($('deleteCurClsBtn')) {
     $('deleteCurClsBtn').addEventListener('click', function () {
-      var name = S.cls;
-      var list = S.classList || (S.classes || []).map(function (c) { return { name: c }; });
-      if (list.length <= 1) {
-        toast('系統僅剩一個班級，無法刪除', 'err');
-        return;
-      }
-      ask({
-        title: '刪除班級 ' + name + '？',
-        msg: '此操作將永久刪除 ' + name + ' 班的座次表、歷次作業記錄與學生名單，無法還原。確認刪除？',
-        ok: '確認刪除',
-        onOk: function () {
-          post({ action: 'deleteClass', cls: name })
-            .then(function () {
-              toast('班級 ' + name + ' 已刪除', 'ok');
-              return load('', '');
-            })
-            .then(function () {
-              openSettingsModal('classes');
-            })
-            .catch(fail);
-        }
-      });
+      if (S && S.cls) confirmDeleteClass(S.cls);
     });
   }
 
@@ -1477,7 +1505,6 @@ function renderGrid() {
   var shown = 0;
 
   order.forEach(function (r) {
-    if (!editMode && rowEmpty(r)) return;      // hide unused back rows when marking
     shown++;
     var idx = [];
     for (var k = 0; k < cols; k++) idx.push(r * cols + k);
@@ -1843,9 +1870,9 @@ function saveEdit() {
   var seated = S.seats.filter(function (v) { return v; }).length;
   var finish = function () {
     post({ action: 'layout', cls: S.cls, seats: S.seats })
-      .then(function () { toast('Layout saved', 'ok'); })
+      .then(function () { toast('座次佈局已儲存', 'ok'); })
       .catch(function (err) {
-        if (!(err && err.name === 'AuthError')) toast('Layout NOT saved - try again', 'err');
+        if (!(err && err.name === 'AuthError')) toast('座次儲存失敗，請重試', 'err');
       });
 
     editMode = false; picked = null; hist = [];
@@ -1854,10 +1881,9 @@ function saveEdit() {
 
   if (seated < S.total) {
     ask({
-      title: 'Save with empty places?',
-      msg: (S.total - seated) + ' of ' + S.total + ' students have no desk. ' +
-           'They will not appear on the plan until you seat them.',
-      ok: 'Save anyway',
+      title: '尚有未入座學生，確認儲存？',
+      msg: '目前共有 ' + (S.total - seated) + ' 位學生（全班 ' + S.total + ' 人）尚未排入座位，將保留於未入座名單。確認儲存此座次？',
+      ok: '確認儲存',
       onOk: finish
     });
   } else {
@@ -1870,9 +1896,10 @@ function pushHist() {
   if (hist.length > 40) hist.shift();
 }
 
-/** Exactly enough desks for the class, rounded up to whole rows - never more. */
+/** Preserve the class's configured grid size (rows × cols), independent of total students. */
 function ensureHeadroom() {
-  var need = Math.ceil(S.total / S.cols) * S.cols;
+  var configuredRows = S.rows || Math.max(1, Math.ceil((S.seats ? S.seats.length : 0) / S.cols));
+  var need = configuredRows * S.cols;
   while (S.seats.length > need) S.seats.pop();
   while (S.seats.length < need) S.seats.push(null);
 }
@@ -1925,7 +1952,7 @@ function layoutAction(act) {
   var cols = S.cols, rows = rowsNow(), r, k, i;
 
   if (act === 'fill') {
-    var need = Math.ceil(S.total / cols) * cols;
+    var need = Math.max(rows, 1) * cols;
     while (S.seats.length < need) S.seats.push(null);
     for (i = 0; i < S.seats.length; i++) S.seats[i] = (i < S.total) ? i + 1 : null;
 
@@ -1951,7 +1978,7 @@ function layoutAction(act) {
     }
     others.forEach(function (num) { interleaved.push(num); });
 
-    var needAlt = Math.ceil(S.total / cols) * cols;
+    var needAlt = Math.max(rows, 1) * cols;
     while (S.seats.length < needAlt) S.seats.push(null);
     for (i = 0; i < S.seats.length; i++) {
       S.seats[i] = (i < interleaved.length) ? interleaved[i] : null;
@@ -2265,25 +2292,83 @@ function exportXClassForClass(clsName, fmt) {
   }
 }
 
+function confirmDeleteClass(targetCls) {
+  var name = targetCls || (S && S.cls);
+  if (!name) return;
+  var list = S.classList || (S.classes || []).map(function (c) { return { name: c }; });
+  if (list.length <= 1) {
+    toast('系統僅剩一個班級，無法刪除', 'err');
+    return;
+  }
+  ask({
+    title: '🗑️ 確認刪除班級 ' + name + '？',
+    msg: '此操作將永久刪除 ' + name + ' 班的座次表、歷次作業記錄、違規記錄與學生名單，無法還原。確認刪除？',
+    ok: '確認刪除',
+    onOk: function () {
+      var nextCls = '';
+      if (name !== S.cls) {
+        nextCls = S.cls;
+      } else {
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].name !== name) {
+            nextCls = list[i].name;
+            break;
+          }
+        }
+      }
+      post({ action: 'deleteClass', cls: name })
+        .then(function () {
+          toast('班級 ' + name + ' 已刪除', 'ok');
+          return load(nextCls, '');
+        })
+        .then(function () {
+          openSettingsModal('classes');
+        })
+        .catch(fail);
+    }
+  });
+}
+
 function renderClassMgmt() {
   var list = S.classList || (S.classes || []).map(function (c) {
-    return { name: c, total: S.total, cols: S.cols };
+    return { name: c, total: S.total, cols: S.cols, rows: S.rows };
   });
 
   var sideList = $('classMgmtList');
   if (sideList) {
     sideList.innerHTML = list.map(function (c) {
       var isCur = (c.name === S.cls);
-      return '<div class="class-item-chip ' + (isCur ? 'is-current' : '') + '" data-switch-cls="' + esc(c.name) + '">' +
-        '<span class="class-item-name">' + esc(c.name) + '</span>' +
-        (isCur ? '<span class="class-item-badge">目前班級</span>' : '') +
+      var cTotal = c.total || 40;
+      var cCols = c.cols || 8;
+      var cRows = c.rows || Math.ceil(cTotal / cCols);
+      return '<div class="class-item-chip ' + (isCur ? 'is-current is-active' : '') + '" data-switch-cls="' + esc(c.name) + '">' +
+        '<div class="class-item-info">' +
+          '<span class="class-item-name">' + esc(c.name) + '</span>' +
+          '<span class="class-item-meta">' + cTotal + '人 · ' + cRows + '×' + cCols + '（' + (cRows * cCols) + '格）</span>' +
+        '</div>' +
+        '<div class="class-item-actions">' +
+          (isCur ? '<span class="class-item-badge">目前</span>' : '') +
+          (list.length > 1
+            ? '<button type="button" class="class-item-del-btn" data-del-cls="' + esc(c.name) + '" title="刪除 ' + esc(c.name) + ' 班">🗑️</button>'
+            : '') +
+        '</div>' +
       '</div>';
     }).join('');
 
+    sideList.querySelectorAll('[data-del-cls]').forEach(function (delBtn) {
+      delBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var delCls = delBtn.dataset.delCls;
+        if (delCls) confirmDeleteClass(delCls);
+      });
+    });
+
     sideList.querySelectorAll('[data-switch-cls]').forEach(function (chip) {
-      chip.addEventListener('click', function () {
+      chip.addEventListener('click', function (e) {
+        if (e.target && e.target.closest && e.target.closest('[data-del-cls]')) return;
         var targetCls = chip.dataset.switchCls;
         if (targetCls && targetCls !== S.cls) {
+          if ($('updateClsHint')) $('updateClsHint').textContent = '';
           load(targetCls, '').then(function () {
             openSettingsModal('classes');
             toast('已切換至 ' + targetCls + ' 班', 'ok');
@@ -2294,18 +2379,36 @@ function renderClassMgmt() {
   }
 
   if ($('setupCurCls')) $('setupCurCls').textContent = S.cls;
+  if ($('clsNameInput')) $('clsNameInput').value = S.cls;
   if ($('clsTotalInput')) $('clsTotalInput').value = S.total;
   if ($('clsColsInput')) $('clsColsInput').value = S.cols;
 
   var currentCols = S.cols || 8;
   var currentTotal = S.total || 40;
-  var rows = Math.ceil(currentTotal / currentCols);
+  var curMeta = list.find(function (c) { return c.name === S.cls; });
+  var seatRows = (S.seats && S.seats.length) ? Math.ceil(S.seats.length / currentCols) : 0;
+  var rows = S.rows || (curMeta && curMeta.rows) || seatRows || Math.ceil(currentTotal / currentCols);
+  var cap = rows * currentCols;
+  var diff = cap - currentTotal;
+
   if ($('clsRowsInput')) $('clsRowsInput').value = rows;
-  if ($('clsCapacityVal')) $('clsCapacityVal').textContent = rows * currentCols;
+  if ($('clsCapacityVal')) $('clsCapacityVal').textContent = cap;
+  if ($('clsEmptySeatsInfo')) {
+    if (diff >= 0) {
+      $('clsEmptySeatsInfo').innerHTML = '｜學生人數：<b>' + currentTotal + '</b> 人（可留空位：<b>' + diff + '</b> 個）';
+      $('clsEmptySeatsInfo').style.color = 'var(--muted)';
+    } else {
+      $('clsEmptySeatsInfo').innerHTML = '｜學生人數：<b>' + currentTotal + '</b> 人（超出座位 <b>' + (-diff) + '</b> 人，將置於未排座名單）';
+      $('clsEmptySeatsInfo').style.color = '#b45309';
+    }
+  }
+  if ($('clsCurrentSavedTag')) {
+    $('clsCurrentSavedTag').textContent = '目前已存設定：' + S.cls + ' 班（' + currentTotal + ' 人 · ' + rows + ' 行 × ' + currentCols + ' 列＝' + cap + ' 格，空位 ' + Math.max(0, diff) + ' 個）';
+  }
 
   if ($('deleteCurClsBtn')) {
     $('deleteCurClsBtn').disabled = (list.length <= 1);
-    $('deleteCurClsBtn').title = (list.length <= 1) ? '唯一班級不可刪除' : '刪除此班級';
+    $('deleteCurClsBtn').title = (list.length <= 1) ? '唯一班級不可刪除' : '刪除 ' + S.cls + ' 班';
   }
 }
 

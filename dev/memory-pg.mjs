@@ -6,13 +6,14 @@
  * nothing here ships to Vercel.
  */
 
-const db = { classes: [], students: [], sessions: [], marks: [], events: [], discipline: [] };
+const db = { meta: {}, classes: [], students: [], sessions: [], marks: [], events: [], discipline: [] };
 
 const norm = (s) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 
 /** Enough of a class to look real while designing: names on, a few handed in. */
 export function seed() {
+  db.meta = {};
   db.classes = [
     { name: '1A', total: 32, cols: 8, seats: '' },
     { name: '1D', total: 32, cols: 8, seats: '' },
@@ -79,6 +80,24 @@ function exec(text, params = []) {
   if (/^(begin|commit|rollback)$/.test(q)) return [];
   if (q.startsWith('create table') || q.startsWith('alter table') || q.startsWith('create index')) return [];
 
+  if (q.startsWith('select val from app_meta')) {
+    db.meta = db.meta || {};
+    if (q.includes("key = 'initial_demo_seeded'")) {
+      return db.meta['initial_demo_seeded'] ? [{ val: db.meta['initial_demo_seeded'] }] : [];
+    }
+    return db.meta[p[0]] ? [{ val: db.meta[p[0]] }] : [];
+  }
+
+  if (q.startsWith('insert into app_meta')) {
+    db.meta = db.meta || {};
+    if (q.includes("'initial_demo_seeded'")) {
+      db.meta['initial_demo_seeded'] = '1';
+    } else if (p.length >= 2) {
+      db.meta[p[0]] = p[1];
+    }
+    return [];
+  }
+
   if (q.includes('select class, count(*)') && q.includes('from students')) {
     const counts = {};
     for (const s of db.students) counts[s.class] = (counts[s.class] || 0) + 1;
@@ -103,8 +122,21 @@ function exec(text, params = []) {
     const existing = db.classes.find((c) => c.name === p[0]);
     if (!existing) {
       db.classes.push({ name: p[0], total: p[1], cols: p[2], seats: p[3] || '' });
+    } else if (q.includes('do update')) {
+      existing.total = p[1];
+      existing.cols = p[2];
+      if (p[3] !== undefined) existing.seats = p[3];
     }
     return [];
+  }
+
+  if (q === 'select name from classes') {
+    return db.classes.map((c) => ({ name: c.name }));
+  }
+
+  if (q.startsWith('select name from classes where name')) {
+    const c = db.classes.find((x) => x.name === p[0]);
+    return c ? [{ name: c.name }] : [];
   }
 
   if (q.startsWith('select name, total, cols from classes'))
@@ -120,6 +152,36 @@ function exec(text, params = []) {
   if (q.startsWith('select name, total, cols, seats from classes order by name limit 1')) {
     const c = [...db.classes].sort((a, b) => a.name.localeCompare(b.name))[0];
     return c ? [{ ...c }] : [];
+  }
+
+  if (q.startsWith('select name, total, cols, seats from classes order by name')) {
+    return db.classes
+      .map((c) => ({ name: c.name, total: c.total, cols: c.cols, seats: c.seats || '' }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (q.startsWith('update classes set total = $2, cols = $3, seats = $4 where name = $1')) {
+    const c = db.classes.find((x) => x.name === p[0]);
+    if (c) {
+      c.total = p[1];
+      c.cols = p[2];
+      c.seats = p[3];
+    }
+    return [];
+  }
+
+  if (q.startsWith('update classes set total = $2, cols = $3 where name = $1')) {
+    const c = db.classes.find((x) => x.name === p[0]);
+    if (c) {
+      c.total = p[1];
+      c.cols = p[2];
+    }
+    return [];
+  }
+
+  if (q.startsWith('delete from classes where name = $1')) {
+    db.classes = db.classes.filter((x) => x.name !== p[0]);
+    return [];
   }
 
   if (q.startsWith('update classes set seats')) {
@@ -143,6 +205,31 @@ function exec(text, params = []) {
     }
     const c = db.classes.find((x) => x.name === p[0]);
     if (c) c.seats = p[1];
+    return [];
+  }
+
+  if (q.startsWith('update students set class = $1 where class = $2')) {
+    db.students.forEach((s) => { if (s.class === p[1]) s.class = p[0]; });
+    return [];
+  }
+
+  if (q.startsWith('update sessions set class = $1 where class = $2')) {
+    db.sessions.forEach((s) => { if (s.class === p[1]) s.class = p[0]; });
+    return [];
+  }
+
+  if (q.startsWith('update lesson_events set class = $1 where class = $2')) {
+    (db.events || []).forEach((e) => { if (e.class === p[1]) e.class = p[0]; });
+    return [];
+  }
+
+  if (q.startsWith('update discipline_records set class = $1 where class = $2')) {
+    (db.discipline || []).forEach((d) => { if (d.class === p[1]) d.class = p[0]; });
+    return [];
+  }
+
+  if (q.startsWith('update class_lessons set class = $1 where class = $2')) {
+    (db.lessons || []).forEach((l) => { if (l.class === p[1]) l.class = p[0]; });
     return [];
   }
 
@@ -210,10 +297,21 @@ function exec(text, params = []) {
     return [{ id: p[0] }];
   }
 
+  if (q.startsWith('delete from sessions where class = $1')) {
+    db.sessions = db.sessions.filter((s) => s.class !== p[0]);
+    return [];
+  }
+
   if (q.startsWith('select student_no'))
     return db.marks
       .filter((m) => m.session_id === p[0])
       .map((m) => ({ student_no: m.student_no, t: hhmm(m.marked_at) }));
+
+  if (q.startsWith('delete from marks where session_id in (select id from sessions where class = $1)')) {
+    const sessionIds = new Set(db.sessions.filter((s) => s.class === p[0]).map((s) => s.id));
+    db.marks = db.marks.filter((m) => !sessionIds.has(m.session_id));
+    return [];
+  }
 
   if (q.startsWith('delete from marks where session_id = $1 and student_no')) {
     const i = db.marks.findIndex((m) => m.session_id === p[0] && m.student_no === p[1]);
@@ -294,6 +392,11 @@ function exec(text, params = []) {
     return [];
   }
 
+  if (q.startsWith('delete from lesson_events where class = $1')) {
+    db.events = (db.events || []).filter((e) => e.class !== p[0]);
+    return [];
+  }
+
   if (q.startsWith('insert into discipline_records')) {
     db.discipline = db.discipline || [];
     const inserted = [];
@@ -357,6 +460,11 @@ function exec(text, params = []) {
     return [];
   }
 
+  if (q.startsWith('delete from discipline_records where class = $1')) {
+    db.discipline = (db.discipline || []).filter((r) => r.class !== p[0]);
+    return [];
+  }
+
   if (q.includes('from discipline_records')) {
     let rows = [...(db.discipline || [])];
     if (q.includes('where class = $1 and student_no = $2')) {
@@ -395,6 +503,11 @@ function exec(text, params = []) {
 
   if (q.startsWith('delete from class_lessons where class = $1 and lesson_date')) {
     db.lessons = (db.lessons || []).filter((l) => !(l.class === p[0] && l.lesson_date === p[1]));
+    return [];
+  }
+
+  if (q.startsWith('delete from class_lessons where class = $1')) {
+    db.lessons = (db.lessons || []).filter((l) => l.class !== p[0]);
     return [];
   }
 
